@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>免费影院</title>
+<style>
+  :root {
+    --bg: #f6f6f8; --surface: #ffffff; --text: #1b1b1f; --muted: #6b6b76;
+    --accent: #e5484d; --border: #e3e3e8; --chip: #ececf1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111114; --surface: #1c1c21; --text: #ededf0; --muted: #9a9aa6;
+      --accent: #ff6369; --border: #2c2c33; --chip: #26262d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111114; --surface: #1c1c21; --text: #ededf0; --muted: #9a9aa6;
+    --accent: #ff6369; --border: #2c2c33; --chip: #26262d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--surface);
+    border-bottom: 1px solid var(--border); padding: 12px 16px;
+  }
+  .bar { max-width: 1200px; margin: 0 auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 20px; margin: 0; white-space: nowrap; }
+  h1 span { color: var(--accent); }
+  form { flex: 1; display: flex; gap: 8px; min-width: 220px; }
+  input, select, button {
+    font: inherit; color: var(--text); background: var(--chip);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  }
+  input { flex: 1; min-width: 0; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  nav { max-width: 1200px; margin: 10px auto 0; display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+  nav button { white-space: nowrap; border-radius: 999px; padding: 6px 14px; }
+  nav button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+  main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+  .status { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; cursor: pointer; transition: transform .15s;
+  }
+  .card:hover { transform: translateY(-3px); }
+  .thumb { aspect-ratio: 3 / 4; width: 100%; object-fit: cover; display: block; background: var(--chip); }
+  .info { padding: 8px 10px 10px; }
+  .title { font-size: 14px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .more { display: block; margin: 24px auto; }
+  dialog {
+    width: min(960px, calc(100vw - 32px)); padding: 0; border: none; border-radius: 12px;
+    background: var(--surface); color: var(--text);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.75); }
+  .player { aspect-ratio: 16 / 9; width: 100%; border: 0; display: block; background: #000; }
+  .dlg-body { padding: 12px 16px 16px; display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+  .dlg-body h2 { font-size: 17px; margin: 0 0 4px; }
+  .dlg-body a { color: var(--accent); font-size: 13px; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 24px 16px 40px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>🎬 免费<span>影院</span></h1>
+    <form id="search">
+      <input id="q" type="search" placeholder="搜索片名，如 Chaplin、Nosferatu…">
+      <button class="primary" type="submit">搜索</button>
+    </form>
+    <select id="sort" aria-label="排序">
+      <option value="downloads desc">🔥 最热门</option>
+      <option value="week desc">📈 本周热门</option>
+      <option value="avg_rating desc">⭐ 评分最高</option>
+      <option value="addeddate desc">🆕 最新上架</option>
+    </select>
+  </div>
+  <nav id="cats"></nav>
+</header>
+
+<main>
+  <div class="status" id="status">加载中…</div>
+  <div class="grid" id="grid"></div>
+  <button class="more" id="more" hidden>加载更多</button>
+</main>
+
+<dialog id="dlg">
+  <iframe class="player" id="player" allow="autoplay; fullscreen"></iframe>
+  <div class="dlg-body">
+    <div>
+      <h2 id="dlg-title"></h2>
+      <a id="dlg-link" target="_blank" rel="noopener">在 Internet Archive 查看详情 / 下载</a>
+    </div>
+    <button id="close">关闭</button>
+  </div>
+</dialog>
+
+<footer>
+  影片均来自 <a href="https://archive.org" target="_blank" rel="noopener">Internet Archive</a> 的公共领域与开放授权馆藏，可合法免费观看。
+</footer>
+
+<script>
+  // 分类 → Internet Archive 馆藏（collection）
+  const CATEGORIES = [
+    { name: "热门电影", collection: "feature_films" },
+    { name: "动画卡通", collection: "animationandcartoons" },
+    { name: "默片经典", collection: "silent_films" },
+    { name: "黑色电影", collection: "Film_Noir" },
+    { name: "科幻恐怖", collection: "SciFi_Horror" },
+    { name: "经典电视", collection: "classic_tv" },
+    { name: "历史影像", collection: "prelinger" },
+  ];
+  const ROWS = 36;
+  const API = "https://archive.org/advancedsearch.php";
+
+  const state = { cat: 0, query: "", sort: "downloads desc", page: 1, total: 0 };
+  const $ = (id) => document.getElementById(id);
+
+  function renderCats() {
+    $("cats").innerHTML = "";
+    CATEGORIES.forEach((c, i) => {
+      const b = document.createElement("button");
+      b.textContent = c.name;
+      b.className = i === state.cat && !state.query ? "active" : "";
+      b.onclick = () => { state.cat = i; state.query = ""; $("q").value = ""; reload(); };
+      $("cats").appendChild(b);
+    });
+  }
+
+  function buildQuery() {
+    const base = "mediatype:movies AND NOT access-restricted-item:true";
+    if (state.query) {
+      const term = state.query.replace(/[":()\\]/g, " ").trim();
+      return `${base} AND title:(${term}) AND (${CATEGORIES.map(c => "collection:" + c.collection).join(" OR ")})`;
+    }
+    return `${base} AND collection:${CATEGORIES[state.cat].collection}`;
+  }
+
+  async function load() {
+    const params = new URLSearchParams({ q: buildQuery(), rows: ROWS, page: state.page, output: "json" });
+    ["identifier", "title", "year", "downloads"].forEach(f => params.append("fl[]", f));
+    params.append("sort[]", state.sort);
+    $("more").hidden = true;
+    $("status").textContent = "加载中…";
+    try {
+      const res = await fetch(`${API}?${params}`);
+      if (!res.ok) throw new Error(res.status);
+      const { response } = await res.json();
+      state.total = response.numFound;
+      response.docs.forEach(addCard);
+      const shown = $("grid").children.length;
+      $("status").textContent = shown ? `共 ${state.total.toLocaleString()} 部，已显示 ${shown} 部` : "没有找到相关影片，换个关键词试试（片名多为英文）";
+      $("more").hidden = shown >= state.total;
+    } catch (e) {
+      $("status").textContent = "加载失败，请检查网络后重试。";
+    }
+  }
+
+  function addCard(doc) {
+    const title = Array.isArray(doc.title) ? doc.title[0] : (doc.title || doc.identifier);
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <img class="thumb" loading="lazy" alt="">
+      <div class="info"><div class="title"></div><div class="meta"></div></div>`;
+    card.querySelector("img").src = `https://archive.org/services/img/${encodeURIComponent(doc.identifier)}`;
+    card.querySelector(".title").textContent = title;
+    card.querySelector(".meta").textContent =
+      [doc.year, doc.downloads ? `▶ ${formatCount(doc.downloads)}` : ""].filter(Boolean).join(" · ");
+    card.onclick = () => play(doc.identifier, title);
+    $("grid").appendChild(card);
+  }
+
+  function formatCount(n) {
+    return n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, "") + " 万" : String(n);
+  }
+
+  function play(id, title) {
+    $("player").src = `https://archive.org/embed/${encodeURIComponent(id)}`;
+    $("dlg-title").textContent = title;
+    $("dlg-link").href = `https://archive.org/details/${encodeURIComponent(id)}`;
+    $("dlg").showModal();
+  }
+
+  function reload() {
+    state.page = 1;
+    $("grid").innerHTML = "";
+    renderCats();
+    load();
+  }
+
+  $("dlg").addEventListener("close", () => { $("player").src = "about:blank"; });
+  $("close").onclick = () => $("dlg").close();
+  $("dlg").onclick = (e) => { if (e.target === $("dlg")) $("dlg").close(); };
+  $("more").onclick = () => { state.page++; load(); };
+  $("sort").onchange = (e) => { state.sort = e.target.value; reload(); };
+  $("search").onsubmit = (e) => { e.preventDefault(); state.query = $("q").value.trim(); reload(); };
+
+  reload();
+</script>
+</body>
+</html>
