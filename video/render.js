@@ -1,9 +1,13 @@
 // 4 个浏览器页面并行逐帧渲染，各自编码成一段 mp4，最后无损拼接
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
-const FPS = 24, DURATION = 116, TOTAL = FPS * DURATION, WORKERS = 4;
+// 用法：node render.js <页面.html> <输出.mp4> [时间轴.json]
+const FPS = 24, WORKERS = 4;
 const path = require('path'), fs = require('fs');
-const OUT = process.argv[2] || path.join(__dirname, 'eternity.mp4');
+const PAGE = path.resolve(process.argv[2] || path.join(__dirname, 'eternity.html'));
+const OUT = path.resolve(process.argv[3] || PAGE.replace(/\.html$/, '.mp4'));
+const TIMELINE = process.argv[4] ? fs.readFileSync(process.argv[4], 'utf8') : null;
+const DURATION = TIMELINE ? JSON.parse(TIMELINE).duration : 116, TOTAL = Math.ceil(FPS * DURATION);
 const SEG = fs.mkdtempSync(path.join(require('os').tmpdir(), 'eternity-'));
 (async () => {
   const b = await chromium.launch();
@@ -11,7 +15,8 @@ const SEG = fs.mkdtempSync(path.join(require('os').tmpdir(), 'eternity-'));
   const t0 = Date.now();
   await Promise.all(Array.from({ length: WORKERS }, async (_, w) => {
     const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
-    await p.goto('file://' + path.join(__dirname, 'eternity.html'));
+    if (TIMELINE) await p.addInitScript(`window.TIMELINE = ${TIMELINE};`);
+    await p.goto('file://' + PAGE);
     await p.evaluate(() => window.ready);
     const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
       '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(FPS), path.join(SEG, `seg${w}.mp4`)], { stdio: ['pipe', 'inherit', 'inherit'] });

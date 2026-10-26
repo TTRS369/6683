@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>拾星</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// 《拾星》MV：逐帧确定性渲染，renderAt(t) 只依赖时间 t。
+// 段落时间和歌词时间来自 window.TIMELINE（渲染脚本按歌曲分析结果注入），没有时用下面的默认值预览。
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+
+const DEFAULT_TIMELINE = {
+  duration: 270,
+  sections: { intro: [0, 12], v1: [12, 40], pre1: [40, 50], ch1: [50, 80], v2: [80, 108], pre2: [108, 118], ch2: [118, 148], bridge: [158, 190], fin: [190, 235], outro: [235, 270] },
+  lyrics: null,
+};
+const LYRIC_LINES = {
+  v1: ["废墟里睡了很久很久", "齿轮锈住了每个白昼", "直到一颗星划过夜空", "落向我从没去过的尽头"],
+  pre1: ["电量只剩下一半", "可我想去看看"],
+  ch1: ["我要去拾一颗星", "穿过荒原 穿过森林", "就算路远到没有回音", "我也要走到你身边去", "一步一步 一盏小灯", "照着我 也照着你"],
+  v2: ["森林说夜晚太冷", "大海说浪太深", "我把脚印留在沙里", "潮水一来 什么都不剩"],
+  pre2: ["电量只剩下一点", "星光就在山巅"],
+  ch2: ["我要去拾一颗星", "穿过荒原 穿过森林", "就算路远到没有回音", "我也要走到你身边去", "一步一步 一盏小灯", "照着我 也照着你"],
+  bridge: ["原来你也会害怕黑暗", "原来你也在等谁出现", "把我最后的光给你吧", "你要回到天上 好好地亮"],
+  fin: ["我拾到了一颗星", "它回到夜空最深的地方", "我闭上眼睛 慢慢睡去", "春天会替我记得这段旅行", "一步一步 一盏小灯", "在花开的地方 又亮起"],
+};
+const TL = window.TIMELINE || DEFAULT_TIMELINE;
+// 某句歌词开始唱的时间，用来把画面动作卡在歌词上
+const lyricStart = (txt, fallback) => { const l = (TL.lyrics || []).find(x => x[2] === txt); return l ? l[0] : fallback; };
+const S = TL.sections;
+// 没有逐句时间时，在每段里平均分配歌词
+const LYRICS = TL.lyrics || Object.entries(LYRIC_LINES).flatMap(([k, lines]) => {
+  const [a, b] = S[k], n = lines.length, step = (b - a) / n;
+  return lines.map((txt, i) => [a + i * step + 0.3, a + (i + 1) * step - 0.2, txt]);
+});
+
+// ---------- 工具 ----------
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ss = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
+const lerp = (a, b, p) => a + (b - a) * p;
+const win = (t, a, b, f = 1) => ss(a, a + f, t) * (1 - ss(b - f, b, t));
+const prog = (k, t) => clamp((t - S[k][0]) / (S[k][1] - S[k][0]));
+const mod = (a, n) => ((a % n) + n) % n;
+
+function glow(c, x, y, r, rgb, a) {
+  if (r <= 0 || a <= 0) return;
+  const g = c.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${rgb},${a})`); g.addColorStop(0.4, `rgba(${rgb},${a * 0.3})`); g.addColorStop(1, `rgba(${rgb},0)`);
+  c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+}
+function skyGrad(c, stops) {
+  const g = c.createLinearGradient(0, 0, 0, H);
+  stops.forEach(([p, col]) => g.addColorStop(p, col));
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+}
+function ridge(c, base, amp, freq, seed, col, offset = 0, step = 16) {
+  c.fillStyle = col; c.beginPath(); c.moveTo(0, H);
+  for (let x = 0; x <= W + step; x += step) {
+    const u = x + offset;
+    c.lineTo(x, base - amp * (0.55 * Math.sin(u * freq + seed) + 0.3 * Math.sin(u * freq * 2.3 + seed * 1.7) + 0.15 * Math.sin(u * freq * 5.1 + seed * 3.1)));
+  }
+  c.lineTo(W, H); c.closePath(); c.fill();
+}
+function stars(c, t, n, seed, alpha, maxY = H * 0.7) {
+  const r = rng(seed);
+  for (let i = 0; i < n; i++) {
+    const x = r() * W, y = r() * maxY, s = 0.6 + Math.pow(r(), 3) * 2.4, f = 0.5 + r() * 2, ph = r() * TAU;
+    const a = alpha * (0.35 + 0.65 * r()) * (0.6 + 0.4 * Math.sin(t * f + ph));
+    c.fillStyle = `rgba(240,240,255,${a})`; c.fillRect(x, y, s, s);
+  }
+}
+
+// ---------- 阿锈（原创角色） ----------
+// 原点在双脚中间的地面上。opts: walk(步伐相位，null 为静止), eye(0~1 睁眼程度), lamp(电量 0~1，-1 熄灭),
+// pose('stand'|'sit'|'slump'), look(-1 低头 ~ 1 抬头), face(1 朝右 / -1 朝左), moss(0~1 身上长出的花草)
+function drawRobot(c, x, y, s, o) {
+  const face = o.face ?? 1, pose = o.pose || "stand", walk = o.walk, eye = o.eye ?? 1, lamp = o.lamp ?? 1, look = o.look ?? 0;
+  c.save(); c.translate(x, y); c.scale(s * face, s);
+  const dark = "#3a3532", rust = "#c46f3a", rust2 = "#a85a2c", head = "#d98a4a";
+  const bob = walk == null ? 0 : Math.abs(Math.sin(walk)) * -3;
+  let bodyY = -44 + bob, tilt = 0;
+  if (pose === "sit") bodyY = -22;
+  if (pose === "slump") { bodyY = -20; tilt = 0.25; }
+  // 腿
+  c.strokeStyle = dark; c.lineWidth = 6; c.lineCap = "round"; c.fillStyle = dark;
+  if (pose === "stand") {
+    const sw = walk == null ? 0 : Math.sin(walk) * 9, lift = walk == null ? 0 : 1;
+    const l1 = [-9 + sw, -Math.max(0, -Math.sin(walk ?? 0)) * 5 * lift], l2 = [9 - sw, -Math.max(0, Math.sin(walk ?? 0)) * 5 * lift];
+    for (const [hx, l] of [[-9, l1], [9, l2]]) {
+      c.beginPath(); c.moveTo(hx, bodyY + 36); c.lineTo(l[0], l[1] - 4); c.stroke();
+      c.beginPath(); c.ellipse(l[0] + 3, l[1] - 2, 8, 4, 0, 0, TAU); c.fill();
+    }
+  } else {
+    for (const hx of [-8, 8]) {
+      c.beginPath(); c.moveTo(hx, bodyY + 34); c.lineTo(hx + 26, -4); c.stroke();
+      c.beginPath(); c.ellipse(hx + 30, -5, 4, 8, 0, 0, TAU); c.fill();
+    }
+  }
+  c.translate(0, bodyY); c.rotate(tilt);
+  // 手臂
+  const arm = walk == null ? 0 : Math.sin(walk) * 0.5;
+  c.lineWidth = 5;
+  for (const [sx, a] of [[-24, arm], [24, -arm]]) {
+    const ax = sx + Math.sin(a) * 18 * Math.sign(sx) * 0.3, ay = 30 + Math.cos(a) * 2;
+    c.beginPath(); c.moveTo(sx, 8); c.lineTo(sx + Math.sin(a) * 14, ay); c.stroke();
+    c.beginPath(); c.arc(sx + Math.sin(a) * 14, ay + 2, 4.5, 0, TAU); c.fill();
+  }
+  // 油桶身子
+  c.fillStyle = rust;
+  c.beginPath(); c.roundRect(-22, 0, 44, 40, 8); c.fill();
+  c.fillStyle = rust2; c.fillRect(-22, 10, 44, 3); c.fillRect(-22, 28, 44, 3);
+  c.fillStyle = "rgba(90,40,20,.45)"; c.beginPath(); c.arc(-12, 34, 5, 0, TAU); c.arc(13, 6, 3, 0, TAU); c.fill();
+  // 胸口电量表
+  c.fillStyle = "#1d1a19"; c.beginPath(); c.roundRect(-11, 15, 22, 11, 2); c.fill();
+  const bars = lamp < 0 ? 0 : Math.ceil(lamp * 3 - 0.01);
+  const bc = lamp > 0.6 ? "120,230,140" : lamp > 0.3 ? "250,210,90" : "250,90,80";
+  for (let i = 0; i < 3; i++) { c.fillStyle = i < bars ? `rgb(${bc})` : "#33302e"; c.fillRect(-9 + i * 6.5, 17, 5, 7); }
+  // 脑袋（旧收音机）
+  c.save(); c.translate(0, -4); c.rotate(-look * 0.28);
+  c.fillStyle = dark; c.fillRect(-4, -6, 8, 8);
+  c.fillStyle = head; c.beginPath(); c.roundRect(-26, -40, 52, 36, 9); c.fill();
+  c.fillStyle = "rgba(120,55,25,.35)"; c.beginPath(); c.arc(18, -12, 4, 0, TAU); c.fill();
+  c.fillStyle = "#1a2226"; c.beginPath(); c.roundRect(-19, -34, 30, 24, 6); c.fill();
+  // 侧面旋钮
+  c.fillStyle = rust2; c.beginPath(); c.arc(18, -28, 3.5, 0, TAU); c.arc(18, -19, 3.5, 0, TAU); c.fill();
+  // 眼睛
+  if (eye > 0.02) {
+    c.fillStyle = `rgba(120,240,255,${0.35 + 0.65 * eye})`;
+    c.shadowColor = "rgba(120,240,255,.9)"; c.shadowBlur = 10 * eye;
+    for (const ex of [-10, 2]) { c.beginPath(); c.roundRect(ex - 3, -22 - 5 * eye, 7, Math.max(1.5, 10 * eye), 3); c.fill(); }
+    c.shadowBlur = 0;
+  } else {
+    c.strokeStyle = "rgba(120,240,255,.25)"; c.lineWidth = 1.5;
+    for (const ex of [-10, 2]) { c.beginPath(); c.moveTo(ex - 3, -22); c.lineTo(ex + 4, -22); c.stroke(); }
+  }
+  // 天线和指示灯
+  c.strokeStyle = dark; c.lineWidth = 2.5; c.beginPath(); c.moveTo(-8, -40); c.quadraticCurveTo(-12, -54, -6, -62); c.stroke();
+  if (lamp >= 0) {
+    const lc = lamp > 0.6 ? "120,230,140" : lamp > 0.3 ? "250,210,90" : "250,90,80";
+    const blink = lamp <= 0.3 ? 0.55 + 0.45 * Math.sin((o.t || 0) * 6) : 1;
+    glow(c, -6, -64, 16, lc, 0.55 * blink);
+    c.fillStyle = `rgba(${lc},${blink})`; c.beginPath(); c.arc(-6, -64, 4, 0, TAU); c.fill();
+  } else { c.fillStyle = "#4a4442"; c.beginPath(); c.arc(-6, -64, 4, 0, TAU); c.fill(); }
+  // 身上长出的小花
+  if (o.moss > 0) {
+    const r = rng(77);
+    for (let i = 0; i < 9; i++) {
+      const fx = -24 + r() * 48, fy = -40 + r() * 6, k = clamp(o.moss * 9 - i);
+      if (k <= 0) continue;
+      c.strokeStyle = "#5a9a4a"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(fx, fy); c.lineTo(fx, fy - 8 * k); c.stroke();
+      c.fillStyle = ["#ffd1e0", "#fff3b0", "#ffffff", "#ffb3c7"][i % 4];
+      c.beginPath(); c.arc(fx, fy - 8 * k, 3 * k, 0, TAU); c.fill();
+    }
+  }
+  c.restore();
+  c.restore();
+}
+
+// 星星（会害怕的一小团光）
+function drawStar(c, x, y, r, t, bright, fear = 0) {
+  const jit = fear * Math.sin(t * 23) * 2;
+  c.globalCompositeOperation = "lighter";
+  glow(c, x + jit, y, r * 7, "255,220,150", 0.35 * bright);
+  glow(c, x + jit, y, r * 2.5, "255,240,200", 0.9 * bright);
+  c.fillStyle = `rgba(255,255,240,${bright})`;
+  c.beginPath();
+  for (let i = 0; i < 10; i++) { const a = i * Math.PI / 5 - Math.PI / 2 + t * 0.3, rr = i % 2 ? r * 0.45 : r; c.lineTo(x + jit + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+  c.closePath(); c.fill();
+  c.globalCompositeOperation = "source-over";
+}
+
+// ---------- 场景 ----------
+// 场景 1：废墟（前奏 + 第一段主歌 + 预副歌）
+function sceneRuins(c, t) {
+  const pv = prog("v1", t), pp = prog("pre1", t);
+  const night = 1 - ss(S.v1[0], S.pre1[1], t) * 0.4;
+  skyGrad(c, [[0, `rgb(${lerp(30, 70, 1 - night) | 0},${lerp(28, 50, 1 - night) | 0},${lerp(60, 90, 1 - night) | 0})`], [0.7, "#5a4a6a"], [1, "#2a2230"]]);
+  stars(c, t, 220, 11, 0.6 * night);
+  // 坠落的星：第一段主歌第三句"直到一颗星划过夜空"
+  const fall = lyricStart("直到一颗星划过夜空", S.v1[0] + (S.v1[1] - S.v1[0]) * 0.5);
+  if (t > fall - 0.2 && t < fall + 3) {
+    const p = ss(fall, fall + 2.2, t), sx = lerp(300, 1650, p), sy = lerp(120, 560, p * p);
+    const g = c.createLinearGradient(sx - 260, sy - 90, sx, sy);
+    g.addColorStop(0, "rgba(255,230,170,0)"); g.addColorStop(1, `rgba(255,240,200,${0.9 * (1 - ss(fall + 2, fall + 3, t))})`);
+    c.strokeStyle = g; c.lineWidth = 4; c.beginPath(); c.moveTo(sx - 260, sy - 90 * (1 + p)); c.lineTo(sx, sy); c.stroke();
+    drawStar(c, sx, sy, 7, t, 1 - ss(fall + 2, fall + 3, t));
+  }
+  // 远方地平线上的星光（落下之后一直在那里）
+  if (t > fall + 2) { c.globalCompositeOperation = "lighter"; glow(c, 1650, 600, 120, "255,210,140", 0.3 * ss(fall + 2, fall + 4, t) * (0.8 + 0.2 * Math.sin(t * 2))); c.globalCompositeOperation = "source-over"; }
+  // 倒塌的楼群
+  const r = rng(21);
+  for (let layer = 0; layer < 2; layer++) {
+    c.fillStyle = layer ? "#241d2a" : "#352b3c";
+    for (let i = 0; i < 14; i++) {
+      const bx = r() * W, bw = 70 + r() * 140, bh = (layer ? 220 : 320) + r() * 260, base = layer ? 820 : 760;
+      c.beginPath(); c.moveTo(bx, base);
+      c.lineTo(bx, base - bh); c.lineTo(bx + bw * 0.4, base - bh + r() * 60); c.lineTo(bx + bw * 0.7, base - bh - r() * 30); c.lineTo(bx + bw, base - bh + 40 + r() * 80); c.lineTo(bx + bw, base); c.fill();
+      if (!layer) for (let wy = base - bh + 40; wy < base - 20; wy += 34) for (let wx = bx + 10; wx < bx + bw - 14; wx += 26) if (r() < 0.12) { c.fillStyle = "rgba(255,200,120,.18)"; c.fillRect(wx, wy, 10, 14); c.fillStyle = "#352b3c"; }
+    }
+  }
+  // 地面和废铁堆
+  c.fillStyle = "#1a1418"; c.fillRect(0, 820, W, H - 820);
+  c.fillStyle = "#2a2026";
+  for (let i = 0; i < 9; i++) { const px = r() * W, pw = 120 + r() * 200; c.beginPath(); c.moveTo(px, 860); c.lineTo(px + pw * 0.3, 860 - 40 - r() * 50); c.lineTo(px + pw * 0.6, 860 - 20 - r() * 40); c.lineTo(px + pw, 860); c.fill(); }
+  // 飘着的灰尘
+  for (let i = 0; i < 60; i++) { const q = rng(300 + i); const x = mod(q() * W + t * (8 + q() * 12), W), y = 300 + q() * 600 + Math.sin(t * 0.5 + i) * 10; c.fillStyle = `rgba(220,200,220,${0.15 + q() * 0.2})`; c.fillRect(x, y, 2, 2); }
+  // 阿锈：前奏里沉睡 → 星落时睁眼 → 站起来，预副歌看电量、望向远方
+  const wake = ss(fall + 0.8, fall + 2.5, t), stand = ss(S.v1[1] - 5, S.v1[1] - 2, t);
+  const eye = t < fall + 0.8 ? 0 : (t < fall + 1.6 ? (Math.sin((t - fall) * 30) > 0 ? 1 : 0.1) : 1) * wake;
+  drawRobot(c, 780, 860, 2.6, { pose: stand > 0.5 ? "stand" : (wake > 0.5 ? "sit" : "slump"), eye, lamp: t < fall + 1 ? -1 : 0.5, look: stand > 0.5 ? 0.2 + pp * 0.3 : (wake > 0.5 ? 0.5 : -0.6), t });
+  // 前奏片名
+  textCard(c, t, S.intro[0] + 2, S.v1[0] + 2, "拾 星", "一个小机器人的旅程");
+}
+
+// 场景 2：荒原日出 → 森林（第一段副歌）
+function sceneJourney(c, t) {
+  const p = prog("ch1", t), forest = ss(0.42, 0.58, p), walk = (t - S.ch1[0]) * 7;
+  const off = (t - S.ch1[0]) * 120;
+  // 荒原
+  skyGrad(c, [[0, "#3b5a8a"], [0.5, "#f0a46a"], [0.75, "#ffd59a"], [1, "#e0b080"]]);
+  c.globalCompositeOperation = "lighter"; glow(c, 1400, 640, 260, "255,200,120", 0.55); c.globalCompositeOperation = "source-over";
+  c.fillStyle = "#ffe2a8"; c.beginPath(); c.arc(1400, 640, 70, 0, TAU); c.fill();
+  ridge(c, 700, 60, 0.002, 1, "#c48a6a", off * 0.2);
+  // 远处倒下的电塔
+  c.strokeStyle = "rgba(90,60,60,.6)"; c.lineWidth = 4;
+  for (let i = 0; i < 4; i++) { const x = mod(300 + i * 600 - off * 0.35, W + 400) - 200; c.beginPath(); c.moveTo(x, 720); c.lineTo(x + 30, 560); c.lineTo(x + 60, 720); c.moveTo(x + 10, 650); c.lineTo(x + 50, 650); c.stroke(); }
+  ridge(c, 790, 40, 0.004, 2, "#a8704e", off * 0.5);
+  ridge(c, 880, 26, 0.006, 3, "#7a4e38", off);
+  // 森林（在副歌中段换场）
+  if (forest > 0) {
+    c.save(); c.globalAlpha = forest;
+    skyGrad(c, [[0, "#1e3a3a"], [0.6, "#3a6a5a"], [1, "#1a2e26"]]);
+    for (let layer = 0; layer < 3; layer++) {
+      const col = ["#2c5048", "#1e3a32", "#11241e"][layer], sp = [0.25, 0.55, 1][layer], base = [700, 800, 900][layer], hgt = [260, 330, 420][layer];
+      c.fillStyle = col;
+      for (let i = -1; i < 16; i++) { const x = mod(i * 140 - off * sp, W + 280) - 140, hh = hgt * (0.7 + 0.3 * Math.sin(i * 7.3 + layer)); c.beginPath(); c.moveTo(x, base); c.lineTo(x + 50, base - hh); c.lineTo(x + 100, base); c.fill(); }
+      c.fillRect(0, base - 2, W, H);
+    }
+    c.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 4; i++) { const x = 300 + i * 450; const g = c.createLinearGradient(x, 0, x + 160, 900); g.addColorStop(0, "rgba(220,255,220,.12)"); g.addColorStop(1, "rgba(220,255,220,0)"); c.fillStyle = g; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + 70, 0); c.lineTo(x + 260, 900); c.lineTo(x + 120, 900); c.fill(); }
+    c.restore();
+  }
+  drawRobot(c, 760, forest > 0.5 ? 900 : 880, 2.2, { walk, eye: 1, lamp: 0.5, look: 0.1, t });
+  c.globalCompositeOperation = "lighter"; glow(c, 1840, 380, 90, "255,210,140", 0.35); c.globalCompositeOperation = "source-over";
+}
+
+// 场景 3：夜里的森林 → 海边（第二段主歌 + 预副歌）
+function sceneNight(c, t) {
+  const p = prog("v2", t), sea = ss(0.4, 0.55, p), walk = (t - S.v2[0]) * 6.2, off = (t - S.v2[0]) * 95;
+  // 冷森林
+  skyGrad(c, [[0, "#081420"], [0.7, "#16304a"], [1, "#0a1620"]]);
+  stars(c, t, 160, 31, 0.6, H * 0.45);
+  for (let layer = 0; layer < 3; layer++) {
+    const col = ["#14283a", "#0e1e2c", "#08121c"][layer], sp = [0.25, 0.55, 1][layer], base = [720, 810, 900][layer], hgt = [280, 340, 420][layer];
+    c.fillStyle = col;
+    for (let i = -1; i < 16; i++) { const x = mod(i * 140 - off * sp, W + 280) - 140, hh = hgt * (0.7 + 0.3 * Math.sin(i * 5.1 + layer)); c.beginPath(); c.moveTo(x, base); c.lineTo(x + 50, base - hh); c.lineTo(x + 100, base); c.fill(); }
+    c.fillRect(0, base - 2, W, H);
+  }
+  c.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 40; i++) { const q = rng(500 + i), x = mod(q() * W - off * 0.6 + Math.sin(t * 0.7 + i) * 40, W), y = 450 + q() * 400 + Math.cos(t * 0.9 + i) * 30; glow(c, x, y, 10, "200,255,150", 0.5 * (0.5 + 0.5 * Math.sin(t * 3 + i))); }
+  c.globalCompositeOperation = "source-over";
+  // 海边
+  let robotY = 900;
+  if (sea > 0) {
+    c.save(); c.globalAlpha = sea;
+    skyGrad(c, [[0, "#06101e"], [0.55, "#1a2c50"], [0.62, "#22406a"], [1, "#0c1a30"]]);
+    stars(c, t, 260, 41, 0.8, H * 0.55);
+    c.fillStyle = "#f6f0d8"; c.beginPath(); c.arc(1500, 220, 50, 0, TAU); c.fill();
+    c.globalCompositeOperation = "lighter"; glow(c, 1500, 220, 200, "220,230,255", 0.3); c.globalCompositeOperation = "source-over";
+    c.fillStyle = "#0e2240"; c.fillRect(0, 640, W, 200);
+    c.strokeStyle = "rgba(200,220,255,.25)"; c.lineWidth = 2;
+    for (let i = 0; i < 9; i++) { const y = 660 + i * 20; c.beginPath(); for (let x = 0; x <= W; x += 20) c.lineTo(x, y + Math.sin(x * 0.02 + t * 1.5 + i) * 3); c.stroke(); }
+    c.fillStyle = "rgba(240,240,255,.25)"; c.fillRect(1440, 650, 120, 4);
+    // 沙滩、脚印和潮水
+    c.fillStyle = "#3a3a52"; c.fillRect(0, 840, W, H - 840);
+    const waveT = (t * 0.35) % 1, waveX = ss(0, 0.5, waveT) * (1 - ss(0.5, 1, waveT));
+    const tide = 840 + waveX * 70;
+    for (let k = 0; k < 18; k++) {
+      const age = k * 0.55, fx = 760 - 40 - k * 36 + ((off) % 36), fy = 905 + (k % 2) * 10;
+      // 潮水涨上来时把较早的脚印抹掉
+      const washed = waveT > 0.45 && fx < 760 - 160;
+      if (!washed) { c.fillStyle = "rgba(20,20,35,.6)"; c.beginPath(); c.ellipse(fx, fy, 7, 3, 0, 0, TAU); c.fill(); }
+    }
+    c.fillStyle = "rgba(180,210,255,.35)"; c.beginPath(); c.moveTo(0, 840);
+    for (let x = 0; x <= W; x += 20) c.lineTo(x, tide + Math.sin(x * 0.015 + t * 2) * 6 - (x > 900 ? (x - 900) * 0.08 : 0));
+    c.lineTo(W, 840); c.fill();
+    c.restore();
+  }
+  // 预副歌：停在海边，电量只剩一格，抬头望山顶的光
+  const pre = ss(S.pre2[0], S.pre2[0] + 2, t);
+  drawRobot(c, 760, robotY, 2.2, { walk: pre > 0.5 ? null : walk, eye: 1, lamp: t > S.pre2[0] ? 0.2 : 0.4, look: pre * 0.8, t });
+  if (t > S.pre2[0] - 1) { c.globalCompositeOperation = "lighter"; glow(c, 1700, 300, 140, "255,210,140", 0.5 * ss(S.pre2[0] - 1, S.pre2[0] + 2, t)); c.globalCompositeOperation = "source-over"; }
+}
+
+// 场景 4：爬山（第二段副歌）
+function sceneMountain(c, t) {
+  const p = prog("ch2", t);
+  skyGrad(c, [[0, "#0c1430"], [0.6, "#2c3c6a"], [1, "#8a9ac0"]]);
+  stars(c, t, 200, 51, 0.5, H * 0.5);
+  ridge(c, 760, 120, 0.0015, 7, "#3a4a72");
+  // 斜坡
+  const slope = x => 1000 - (x - 100) * 0.42;
+  c.fillStyle = "#d8e2f0"; c.beginPath(); c.moveTo(0, H);
+  for (let x = 0; x <= W; x += 10) c.lineTo(x, slope(x) + 8 * Math.sin(x * 0.03) + 5 * Math.sin(x * 0.11));
+  c.lineTo(W, H); c.fill();
+  c.fillStyle = "rgba(120,140,190,.35)";
+  for (let i = 0; i < 12; i++) { const q = rng(600 + i), x = q() * W; c.beginPath(); c.moveTo(x, slope(x) + 20); c.lineTo(x + 30, slope(x + 30) + 10); c.lineTo(x + 50, slope(x + 50) + 40); c.fill(); }
+  // 山顶的星光
+  c.globalCompositeOperation = "lighter"; glow(c, 1840, slope(1840) - 40, 200, "255,210,140", 0.5 + 0.2 * Math.sin(t * 2)); c.globalCompositeOperation = "source-over";
+  // 越爬越慢：走走停停
+  const ease = p - Math.sin(p * TAU * 5) * 0.012;
+  const rx = lerp(260, 1640, ease), ry = slope(rx) + 6;
+  c.save(); c.translate(rx, ry); c.rotate(-0.4); drawRobot(c, 0, 0, 2.0, { walk: (t - S.ch2[0]) * 5 * (1 - p * 0.4), eye: 1, lamp: 0.2, look: 0.3, t }); c.restore();
+  // 风雪
+  for (let i = 0; i < 220; i++) { const q = rng(700 + i), x = mod(q() * W - t * (180 + q() * 120), W), y = mod(q() * H + t * (60 + q() * 60), H); c.fillStyle = `rgba(255,255,255,${0.3 + q() * 0.5})`; c.fillRect(x, y, 2 + q() * 2, 2 + q() * 2); }
+}
+
+// 场景 5：山顶（间奏 + 桥段）：害怕黑暗的星星，阿锈把最后的光给了它
+function scenePeak(c, t) {
+  const pb = prog("bridge", t);
+  skyGrad(c, [[0, "#04060f"], [0.65, "#151a38"], [1, "#2a2a4a"]]);
+  stars(c, t, 420, 61, 0.9);
+  ridge(c, 900, 60, 0.002, 9, "#0e1226");
+  c.fillStyle = "#1a1e36"; c.beginPath(); c.moveTo(500, H); c.quadraticCurveTo(960, 780, 1420, H); c.fill();
+  const sx = 1060, sy = 830;
+  // 星星：先缩成一团发抖，接受光之后越来越亮
+  const give = ss(0.4, 0.85, pb), bright = 0.5 + 0.5 * give;
+  drawStar(c, sx, sy - 10 * give, 12 + 6 * give, t, bright, 1 - give);
+  // 光从阿锈胸口流向星星
+  if (pb > 0.36 && pb < 0.92) {
+    c.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 40; i++) { const u = mod(i / 40 + t * 0.35, 1), x = lerp(905, sx, u), y = lerp(800, sy, u) - Math.sin(u * Math.PI) * 50; glow(c, x, y, 10, "120,230,140", 0.6 * win(pb, 0.36, 0.92, 0.05)); }
+    c.globalCompositeOperation = "source-over";
+  }
+  const lamp = pb < 0.4 ? 0.15 : (pb < 0.88 ? 0.15 * (1 - ss(0.4, 0.88, pb)) + 0.001 : -1);
+  drawRobot(c, 880, 860, 2.2, { pose: "sit", eye: pb < 0.9 ? 1 - ss(0.86, 0.95, pb) : 0, lamp, look: pb < 0.5 ? -0.2 : 0.1, t });
+}
+
+// 场景 6：星星回到天上 → 冬天 → 春天（最后一段副歌 + 尾奏）
+function sceneSpring(c, t) {
+  const pf = prog("fin", t), spring = ss(0.36, 0.66, pf);
+  // 夜空与升起的星
+  skyGrad(c, [[0, "#04060f"], [0.65, "#151a38"], [1, "#2a2a4a"]]);
+  stars(c, t, 420, 61, 0.9);
+  c.save(); c.globalAlpha = spring;
+  skyGrad(c, [[0, "#6aa8e0"], [0.6, "#bfe0f0"], [1, "#f6ecd0"]]);
+  c.restore();
+  const rise = ss(0, 0.25, pf), starY = lerp(820, 160, rise), starX = lerp(1060, 1300, rise);
+  // 星在高空爆开成一片星座
+  if (pf > 0.22) {
+    c.globalCompositeOperation = "lighter";
+    const burst = ss(0.22, 0.35, pf);
+    for (let i = 0; i < 24; i++) { const q = rng(800 + i), a = q() * TAU, d = burst * (80 + q() * 260); glow(c, starX + Math.cos(a) * d, starY + Math.sin(a) * d * 0.6, 14, "255,230,170", 0.6 * (1 - spring * 0.6)); }
+    c.globalCompositeOperation = "source-over";
+  }
+  drawStar(c, starX, starY, 12, t, 1);
+  // 地面：冬天的雪 → 春天的草地
+  c.fillStyle = "#1a1e36"; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 880); c.quadraticCurveTo(960, 800, W, 880); c.lineTo(W, H); c.fill();
+  const winter = ss(0.24, 0.36, pf) * (1 - spring);
+  if (winter > 0) {
+    c.fillStyle = `rgba(230,236,250,${winter})`; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 880); c.quadraticCurveTo(960, 800, W, 880); c.lineTo(W, H); c.fill();
+    for (let i = 0; i < 160; i++) { const q = rng(900 + i), x = mod(q() * W + Math.sin(t + i) * 20, W), y = mod(q() * H + t * (40 + q() * 30), H); c.fillStyle = `rgba(255,255,255,${0.6 * winter})`; c.fillRect(x, y, 3, 3); }
+  }
+  if (spring > 0) {
+    c.save(); c.globalAlpha = spring;
+    c.fillStyle = "#6aaa58"; c.beginPath(); c.moveTo(0, H); c.lineTo(0, 880); c.quadraticCurveTo(960, 800, W, 880); c.lineTo(W, H); c.fill();
+    c.restore();
+    const r = rng(950);
+    for (let i = 0; i < 160; i++) {
+      const fx = r() * W, k = clamp(spring * 1.4 - r() * 0.6), fy = 870 - 70 * Math.sin(Math.PI * fx / W) * 0.9 + 20 + r() * 160;
+      if (k <= 0) continue;
+      const hgt = (14 + r() * 26) * k;
+      c.strokeStyle = "#3f7a3a"; c.lineWidth = 2; c.beginPath(); c.moveTo(fx, fy); c.quadraticCurveTo(fx + 4, fy - hgt / 2, fx + Math.sin(t + i) * 3, fy - hgt); c.stroke();
+      c.fillStyle = ["#ffd1e0", "#fff3b0", "#ffffff", "#ffb3c7", "#c9b8ff"][i % 5];
+      const fr = 5 * k; for (let pI = 0; pI < 5; pI++) { const a = pI * TAU / 5 + i; c.beginPath(); c.arc(fx + Math.sin(t + i) * 3 + Math.cos(a) * fr, fy - hgt + Math.sin(a) * fr, fr * 0.7, 0, TAU); c.fill(); }
+      c.fillStyle = "#ffc94a"; c.beginPath(); c.arc(fx + Math.sin(t + i) * 3, fy - hgt, fr * 0.5, 0, TAU); c.fill();
+    }
+    // 蝴蝶
+    for (let i = 0; i < 6; i++) { const q = rng(990 + i), x = mod(q() * W + t * 40, W), y = 600 + q() * 200 + Math.sin(t * 2 + i) * 30, fl = Math.abs(Math.sin(t * 12 + i)); c.fillStyle = `rgba(255,${200 + i * 8},${150 + i * 15},${spring})`; c.beginPath(); c.ellipse(x - 6 * fl, y, 6 * fl, 4, 0, 0, TAU); c.ellipse(x + 6 * fl, y, 6 * fl, 4, 0, 0, TAU); c.fill(); }
+  }
+  // 星光洒在阿锈身上；最后一句"又亮起"时眼睛重新亮
+  c.globalCompositeOperation = "lighter";
+  const beam = c.createLinearGradient(starX, starY, 880, 860);
+  beam.addColorStop(0, `rgba(255,230,170,${0.25 * ss(0.3, 0.5, pf)})`); beam.addColorStop(1, "rgba(255,230,170,0)");
+  c.fillStyle = beam; c.beginPath(); c.moveTo(starX - 10, starY); c.lineTo(starX + 10, starY); c.lineTo(980, 880); c.lineTo(780, 880); c.fill();
+  c.globalCompositeOperation = "source-over";
+  const relight = ss(0.86, 0.95, pf);
+  drawRobot(c, 880, 860, 2.2, { pose: "sit", eye: relight, lamp: relight > 0.5 ? 1 : -1, look: 0.4 * relight, moss: spring, t });
+  // 尾奏：片尾字幕
+  textCard(c, t, S.outro[0] + 14, S.outro[1] - 1, "拾 星", "词 / 动画：Claude　　曲 / 演唱：Suno.cn AI 生成", true);
+}
+
+function textCard(c, t, a, b, title, sub, dark = false) {
+  const al = win(t, a, b, 1.5);
+  if (al <= 0) return;
+  c.save(); c.globalAlpha = al; c.textAlign = "center"; c.textBaseline = "middle";
+  c.font = '700 120px "Noto Serif SC", serif'; c.letterSpacing = "24px";
+  c.fillStyle = dark ? "#3a2e4a" : "#fff6e6"; c.shadowColor = dark ? "rgba(255,255,255,.8)" : "rgba(255,200,120,.6)"; c.shadowBlur = 30;
+  c.fillText(title, W / 2 + 12, H * 0.36);
+  c.shadowBlur = 0; c.font = '400 30px "Noto Serif SC", serif'; c.letterSpacing = "6px"; c.fillStyle = dark ? "rgba(58,46,74,.9)" : "rgba(255,246,230,.85)";
+  c.fillText(sub, W / 2 + 3, H * 0.36 + 110);
+  c.restore();
+}
+
+// ---------- 场景编排与转场 ----------
+const gap = (a, b) => (a + b) / 2;
+const SCENES = [
+  [sceneRuins, 0, S.ch1[0]],
+  [sceneJourney, S.ch1[0], S.v2[0]],
+  [sceneNight, S.v2[0], S.ch2[0]],
+  [sceneMountain, S.ch2[0], gap(S.ch2[1], S.bridge[0])],
+  [scenePeak, gap(S.ch2[1], S.bridge[0]), S.fin[0]],
+  [sceneSpring, S.fin[0], TL.duration + 1],
+];
+const FADE = 1.2;
+const layers = [0, 1].map(() => { const o = document.createElement("canvas"); o.width = W; o.height = H; return o; });
+
+// 字幕底下一层淡暗色渐变，雪地、春天这些亮背景上也能看清
+const LYRIC_BG = (() => { const g = ctx.createLinearGradient(0, H - 230, 0, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.42)"); return g; })();
+function drawLyrics(t) {
+  ctx.fillStyle = LYRIC_BG; ctx.fillRect(0, H - 230, W, 230);
+  for (const [a, b, txt] of LYRICS) {
+    if (t < a - 0.4 || t > b + 0.4) continue;
+    const al = win(t, a - 0.4, b + 0.4, 0.4);
+    ctx.save(); ctx.globalAlpha = al; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = '500 50px "Noto Serif SC", serif'; ctx.letterSpacing = "8px";
+    ctx.lineWidth = 6; ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.strokeText(txt, W / 2 + 4, H - 92);
+    ctx.fillStyle = "#fffaf0"; ctx.shadowColor = "rgba(0,0,0,.6)"; ctx.shadowBlur = 12;
+    ctx.fillText(txt, W / 2 + 4, H - 92);
+    ctx.restore();
+  }
+}
+
+const VIG = (() => { const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.4, W / 2, H / 2, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.55)"); return g; })();
+
+function renderAt(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  let li = 0;
+  for (const [fn, a, b] of SCENES) {
+    if (t < a - FADE || t > b + FADE) continue;
+    const al = Math.min(ss(a - FADE, a + FADE, t), 1 - ss(b - FADE, b + FADE, t));
+    if (al <= 0) continue;
+    const L = layers[li++ % 2], c = L.getContext("2d");
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over";
+    c.clearRect(0, 0, W, H);
+    fn(c, t);
+    ctx.globalAlpha = a <= 0 ? 1 : al; ctx.drawImage(L, 0, 0); ctx.globalAlpha = 1;
+  }
+  ctx.fillStyle = VIG; ctx.fillRect(0, 0, W, H);
+  // 开头淡入、结尾淡出
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(1 - ss(0, 2.5, t), ss(TL.duration - 2.5, TL.duration, t))})`; ctx.fillRect(0, 0, W, H);
+  drawLyrics(t);
+}
+
+window.renderAt = renderAt;
+window.ready = document.fonts.load('50px "Noto Serif SC"').then(() => document.fonts.load('700 120px "Noto Serif SC"')).then(() => { renderAt(0); return true; });
+</script>
+</body>
+</html>
