@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>余烬与永恒 · 解说</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// 《余烬与永恒》音乐故事解说：逐帧确定性渲染。
+// window.TIMELINE 由渲染脚本注入：解说句子的起止时间、逐帧音乐能量（energy）和低音（bass）。
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const TL = window.TIMELINE, LINES = TL.lines, FPS = TL.fps;
+const GROUND = 860;
+
+// ---------- 工具 ----------
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ss = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
+const lerp = (a, b, p) => a + (b - a) * p;
+const win = (t, a, b, f = 1) => ss(a, a + f, t) * (1 - ss(b - f, b, t));
+const mod = (a, n) => ((a % n) + n) % n;
+const energyAt = (arr, t) => arr[clamp(Math.floor(t * FPS), 0, arr.length - 1)];
+// 某句解说开始的时间（按内容找）
+const lineAt = sub => { const l = LINES.find(x => x.text.includes(sub)); return l ? l.start : 0; };
+function glow(x, y, r, rgb, a) {
+  if (r <= 0 || a <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${rgb},${a})`); g.addColorStop(0.35, `rgba(${rgb},${a * 0.35})`); g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+}
+
+// 故事里的关键时刻（全部取自解说句子的时间）
+const T = {
+  fireOut: lineAt("一场大火"), ember: lineAt("只剩一粒余烬"), wind: lineAt("就是风"), lift: lineAt("托了起来"),
+  hills: lineAt("烧焦的山"), path: lineAt("照亮了一小段路"), weak: lineAt("光就越弱"), strive: lineAt("拼命地亮"),
+  calm: lineAt("风停了"), fall: lineAt("冰冷的泥土"), out: lineAt("然后，熄灭了"), hit: 88.0, seed: lineAt("埋着一颗种子"),
+  warm: lineAt("叫醒了这颗种子"), tree: lineAt("长成一棵树"), forest: lineAt("树连成森林"), cycle: lineAt("千百年过去"),
+  rise: lineAt("被风吹得很高"), sky: lineAt("飞进了夜空"), star: lineAt("变成了一颗星星"), end: lineAt("这就是"),
+};
+
+// ---------- 星空 ----------
+const STARS = Array.from({ length: 3 }, (_, layer) => { const r = rng(10 + layer); return Array.from({ length: [500, 260, 90][layer] }, () => ({ x: r() * W, y: r() * H, s: [1, 1.6, 2.4][layer] * (0.6 + r() * 0.6), b: 0.3 + r() * 0.7, f: 0.4 + r() * 2, ph: r() * TAU })); });
+function starfield(t, bright) {
+  const drift = [6, 12, 22];
+  STARS.forEach((layer, li) => {
+    for (const s of layer) {
+      const x = mod(s.x - t * drift[li], W), y = s.y;
+      const a = bright * s.b * (0.55 + 0.45 * Math.sin(t * s.f + s.ph));
+      if (a <= 0.01) continue;
+      ctx.fillStyle = `rgba(235,238,255,${a})`;
+      if (s.s < 2) ctx.fillRect(x, y, s.s, s.s); else { ctx.beginPath(); ctx.arc(x, y, s.s / 2, 0, TAU); ctx.fill(); }
+    }
+  });
+}
+
+// ---------- 余烬的轨迹 ----------
+// 返回 t 时刻余烬的位置、大小、亮度
+function emberState(t) {
+  if (t < T.ember - 0.5 || (t > T.out + 1.6 && t < T.rise - 0.5)) return null;
+  let x = 960, y = GROUND - 26, size = 1, bright = ss(T.ember - 0.5, T.ember + 1.5, t);
+  bright *= 0.75 + 0.25 * Math.sin(t * 7) * Math.sin(t * 3.1);      // 在灰烬里一明一暗
+  if (t >= T.lift - 0.4 && t < T.rise - 0.5) {
+    // 被风托起，左右飘荡地飞，越飞越弱，风停后落地、熄灭
+    const up = ss(T.lift - 0.4, T.lift + 3, t), fallP = ss(T.calm + 1, T.fall + 2.6, t);
+    const u = t - T.lift;
+    x = 960 + Math.sin(u * 0.23) * 420 + Math.sin(u * 0.61) * 90;
+    y = lerp(GROUND - 26, lerp(430, 500, (Math.sin(u * 0.4) + 1) / 2), up);
+    y = lerp(y, GROUND - 14, fallP);
+    size = lerp(1, 0.55, ss(T.weak, T.calm, t)) * (1 + 0.6 * win(t, T.strive, T.strive + 3.4, 0.4) * Math.abs(Math.sin(t * 5)));
+    bright *= lerp(1, 0.55, ss(T.weak, T.calm, t)) * (1 - ss(T.out, T.out + 1.4, t));
+  }
+  if (t >= T.rise - 0.5) {
+    // 从森林里升起，越飞越高，进入夜空，最后变成星星
+    const p = ss(T.rise - 0.5, T.sky + 2.5, t);
+    x = lerp(1100, 960, p) + Math.sin(t * 0.8) * 40 * (1 - ss(T.sky, T.star, t));
+    y = lerp(GROUND - 160, 330, p);
+    size = 0.9 + 0.5 * energyAt(TL.energy, t);
+    bright = ss(T.rise - 0.5, T.rise + 1, t);
+  }
+  return { x, y, size, bright };
+}
+function drawEmber(t, e) {
+  if (!e || e.bright <= 0.01) return;
+  const toStar = ss(T.star - 0.4, T.star + 1.2, t);
+  const col = toStar > 0 ? `${lerp(255, 220, toStar) | 0},${lerp(150, 235, toStar) | 0},${lerp(70, 255, toStar) | 0}` : "255,150,70";
+  ctx.globalCompositeOperation = "lighter";
+  glow(e.x, e.y, 130 * e.size * (1 + toStar), col, 0.5 * e.bright);
+  glow(e.x, e.y, 30 * e.size, "255,235,200", 0.95 * e.bright);
+  // 飞的时候拖着一串小火星
+  if (t > T.lift && t < T.fall + 2) {
+    for (let i = 1; i <= 14; i++) {
+      const pe = emberState(t - i * 0.07);
+      if (!pe) continue;
+      glow(pe.x + Math.sin(t * 9 + i) * 3, pe.y + i * 0.6, 10 * e.size * (1 - i / 16), "255,170,90", 0.5 * e.bright * (1 - i / 15));
+    }
+  }
+  // 变成星星：十字星芒
+  if (toStar > 0) {
+    ctx.strokeStyle = `rgba(230,240,255,${0.8 * toStar})`; ctx.lineWidth = 2;
+    const L = 70 + 20 * Math.sin(t * 2);
+    ctx.beginPath(); ctx.moveTo(e.x - L, e.y); ctx.lineTo(e.x + L, e.y); ctx.moveTo(e.x, e.y - L); ctx.lineTo(e.x, e.y + L); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+// ---------- 地面、风、山河、种子、森林 ----------
+function ground(t, alpha, tint = "18,14,16") {
+  if (alpha <= 0) return;
+  ctx.fillStyle = `rgba(${tint},${alpha})`;
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 20) ctx.lineTo(x, GROUND + 10 * Math.sin(x * 0.004) + 6 * Math.sin(x * 0.013));
+  ctx.lineTo(W, H); ctx.fill();
+}
+function ashes(t) {
+  // 大火的余光慢慢褪去，地上留下一层灰
+  const fireGlow = 1 - ss(T.fireOut, T.fireOut + 4, t);
+  ctx.globalCompositeOperation = "lighter";
+  if (fireGlow > 0) glow(960, GROUND, 700, "255,110,50", 0.35 * fireGlow * win(t, T.fireOut - 2, T.lift + 4, 2));
+  ctx.globalCompositeOperation = "source-over";
+  const a = win(t, T.fireOut - 1, T.lift + 6, 2);
+  if (a <= 0) return;
+  ground(t, a, "26,22,24");
+  const r = rng(40);
+  for (let i = 0; i < 160; i++) { const x = r() * W, y = GROUND - 6 + r() * 40; ctx.fillStyle = `rgba(150,140,140,${0.25 * a * r()})`; ctx.fillRect(x, y + Math.sin(t + i) * 1.5, 3, 2); }
+}
+function windStreaks(t) {
+  const a = win(t, T.wind - 0.5, T.calm + 1.2, 1.5);
+  if (a <= 0) return;
+  const e = energyAt(TL.energy, t);
+  for (let i = 0; i < 26; i++) {
+    const q = rng(60 + i), y = 220 + q() * 560, len = 120 + q() * 260, x = mod(q() * W * 2 + t * (300 + q() * 260), W + len * 2) - len;
+    const g = ctx.createLinearGradient(x, 0, x + len, 0); g.addColorStop(0, "rgba(200,210,240,0)"); g.addColorStop(0.5, `rgba(200,210,240,${(0.08 + 0.1 * e) * a})`); g.addColorStop(1, "rgba(200,210,240,0)");
+    ctx.strokeStyle = g; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x, y + Math.sin(t + i) * 8); ctx.lineTo(x + len, y + Math.sin(t + i + 1) * 8); ctx.stroke();
+  }
+}
+function journey(t) {
+  // 烧焦的山、干涸的河，从余烬下方缓缓经过
+  const a = win(t, T.hills - 1.5, T.fall + 1, 2);
+  if (a <= 0) return;
+  const off = (t - T.hills) * 40;
+  ctx.fillStyle = `rgba(30,20,22,${a})`;
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 16) ctx.lineTo(x, 780 - 120 * Math.abs(Math.sin((x + off) * 0.0026)) - 40 * Math.sin((x + off) * 0.009));
+  ctx.lineTo(W, H); ctx.fill();
+  ctx.strokeStyle = `rgba(90,80,90,${0.5 * a})`; ctx.lineWidth = 3; ctx.beginPath();
+  for (let x = 0; x <= W; x += 16) ctx.lineTo(x, 900 + 20 * Math.sin((x + off * 1.5) * 0.006)); ctx.stroke();
+  ground(t, a, "14,10,12");
+  // 余烬照亮的那一小段路
+  const lit = win(t, T.path, T.calm, 1.5), e = emberState(t);
+  if (lit > 0 && e) { ctx.globalCompositeOperation = "lighter"; glow(e.x, GROUND, 260, "255,140,70", 0.22 * lit * e.bright); ctx.globalCompositeOperation = "source-over"; }
+}
+// 生命之树（用光画的枝条），从种子位置长出来
+const SEED = [960, GROUND + 60];
+const TREE = [];
+(function grow(x, y, ang, len, d, r) {
+  const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len; TREE.push({ x, y, x2, y2, d });
+  if (d >= 7) return;
+  for (const s of [-1, 1]) grow(x2, y2, ang + s * (0.28 + r() * 0.28), len * (0.72 + r() * 0.08), d + 1, r);
+})(960, GROUND, -Math.PI / 2, 150, 0, rng(77));
+const FOREST = Array.from({ length: 9 }, (_, i) => ({ x: 120 + i * 210 + (i % 2) * 40, s: 0.45 + ((i * 37) % 10) / 30, d: 0.12 * Math.abs(i - 4) }));
+function seedAndLife(t) {
+  if (t < T.out || t > T.rise + 8) return;
+  const groundA = ss(T.out, T.out + 1, t) * (1 - ss(T.rise + 2, T.rise + 8, t));
+  ground(t, groundA, "12,14,14");
+  // 88 秒那一记重击：从地下炸开一圈光
+  const hitP = clamp((t - T.hit) / 2.4);
+  ctx.globalCompositeOperation = "lighter";
+  if (hitP > 0 && hitP < 1) {
+    ctx.strokeStyle = `rgba(255,220,150,${0.8 * (1 - hitP)})`; ctx.lineWidth = 4 * (1 - hitP) + 1;
+    ctx.beginPath(); ctx.arc(SEED[0], SEED[1], 40 + hitP * 900, 0, TAU); ctx.stroke();
+    glow(SEED[0], SEED[1], 600, "255,200,140", 0.5 * (1 - hitP));
+  }
+  // 地下的种子，被最后那点热叫醒
+  const seedA = ss(T.seed - 0.5, T.seed + 1.5, t) * (1 - ss(T.tree, T.tree + 2, t));
+  if (seedA > 0) {
+    glow(SEED[0], SEED[1], 70, "190,255,170", 0.6 * seedA * (0.7 + 0.3 * Math.sin(t * 3)));
+    if (t > T.warm - 0.5) for (let i = 0; i < 18; i++) { const u = mod(t * 0.5 + i / 18, 1); glow(lerp(SEED[0] + Math.sin(i) * 200, SEED[0], u), lerp(SEED[1] - 140, SEED[1], u), 6, "255,170,90", 0.6 * (1 - u) * seedA); }
+  }
+  // 发芽 → 一棵树 → 一片森林；森林随音乐的能量一起发光
+  const treeP = ss(T.warm + 2, T.forest + 1, t) * 8, e = energyAt(TL.energy, t);
+  // 千百年的轮回：森林在"燃烧"（橙色）和"新生"（绿色）之间来回变换
+  const cyc = t > T.cycle ? (Math.sin((t - T.cycle) * TAU / 6) + 1) / 2 * win(t, T.cycle, T.rise, 1.5) : 0;
+  const col = `${lerp(180, 255, cyc) | 0},${lerp(255, 150, cyc) | 0},${lerp(170, 80, cyc) | 0}`;
+  const lifeA = 1 - ss(T.rise + 2, T.rise + 8, t);
+  ctx.lineCap = "round";
+  const drawTree = (ox, sc, delay) => {
+    for (const b of TREE) {
+      const lp = clamp(treeP - delay * 8 - b.d);
+      if (lp <= 0) continue;
+      const x1 = ox + (b.x - 960) * sc, y1 = GROUND - (GROUND - b.y) * sc, x2 = ox + (b.x2 - 960) * sc, y2 = GROUND - (GROUND - b.y2) * sc;
+      ctx.strokeStyle = `rgba(${col},${(0.35 + 0.35 * e) * lifeA})`; ctx.lineWidth = Math.max(1, 7 * sc * Math.pow(0.72, b.d));
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(lerp(x1, x2, lp), lerp(y1, y2, lp)); ctx.stroke();
+      if (b.d === 7 && lp >= 1) glow(x2, y2, 9 * sc + 4, col, (0.5 + 0.4 * e) * lifeA);
+    }
+  };
+  drawTree(960, 1, 0);
+  if (t > T.forest - 1) for (const f of FOREST) if (Math.abs(f.x - 960) > 120) drawTree(f.x, f.s, f.d + clamp((T.forest - t + 1) / 8));
+  // 森林里的鸟和萤火
+  if (t > T.forest + 1) for (let i = 0; i < 40; i++) { const q = rng(200 + i), x = mod(q() * W + t * (20 + q() * 30), W), y = 380 + q() * 420 + Math.sin(t * 1.2 + i) * 24; glow(x, y, 5, col, 0.6 * (0.5 + 0.5 * Math.sin(t * 3 + i)) * lifeA * ss(T.forest + 1, T.forest + 4, t)); }
+  // 每一棵树都升起火星，交给下一个开始
+  if (t > lineAt("交给了下一个开始") - 1) for (let i = 0; i < 30; i++) { const q = rng(300 + i), u = mod(t * (0.12 + q() * 0.1) + q(), 1), x = 200 + q() * 1520 + Math.sin(u * 8 + i) * 30, y = lerp(GROUND - 80, 200, u); glow(x, y, 6, "255,170,90", 0.6 * (1 - u) * lifeA); }
+  ctx.globalCompositeOperation = "source-over";
+}
+// 余烬升空时，山和云从下方掠过
+function ascent(t) {
+  const a = win(t, T.rise - 0.5, T.sky + 3, 1.5);
+  if (a <= 0) return;
+  const p = ss(T.rise - 0.5, T.sky + 2.5, t);
+  ctx.fillStyle = `rgba(16,18,30,${a})`;
+  ctx.beginPath(); ctx.moveTo(0, H);
+  for (let x = 0; x <= W; x += 16) ctx.lineTo(x, lerp(760, 1300, p) - 260 * Math.abs(Math.sin(x * 0.0021 + 1)));
+  ctx.lineTo(W, H); ctx.fill();
+  for (let i = 0; i < 8; i++) {
+    const q = rng(500 + i), cx = q() * W, cy = lerp(200 + q() * 400, 1300 + q() * 300, ss(T.rise + 3, T.sky + 2, t));
+    ctx.fillStyle = `rgba(120,125,150,${0.12 * a})`;
+    for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.ellipse(cx + k * 70 - 100, cy + Math.sin(k) * 10, 120, 36, 0, 0, TAU); ctx.fill(); }
+  }
+}
+
+// ---------- 开场信息卡和片尾 ----------
+function introCard(t) {
+  const a = win(t, 6.0, 15.0, 1.2);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const x = 960 - 330, y = 300;
+  ctx.fillStyle = "rgba(24,24,30,.86)"; ctx.beginPath(); ctx.roundRect(x, y, 660, 240, 26); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.lineWidth = 2; ctx.stroke();
+  // 转动的唱片
+  ctx.save(); ctx.translate(x + 120, y + 120); ctx.rotate(t * 0.8);
+  ctx.fillStyle = "#0c0c10"; ctx.beginPath(); ctx.arc(0, 0, 82, 0, TAU); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,.1)"; ctx.lineWidth = 1; for (let k = 2; k < 8; k++) { ctx.beginPath(); ctx.arc(0, 0, k * 10, 0, TAU); ctx.stroke(); }
+  ctx.fillStyle = "#c8643a"; ctx.beginPath(); ctx.arc(0, 0, 22, 0, TAU); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.6)"; ctx.fillRect(18, -2, 50, 3);
+  ctx.restore();
+  ctx.fillStyle = "#f4f0ea"; ctx.font = '700 46px "Noto Serif SC", serif'; ctx.textBaseline = "alphabetic"; ctx.fillText("余烬与永恒", x + 236, y + 98);
+  ctx.fillStyle = "rgba(244,240,234,.65)"; ctx.font = '400 24px "Noto Serif SC", serif';
+  ctx.fillText("乙白 · Suno.cn", x + 238, y + 142); ctx.fillText("纯音乐 · 3:39", x + 238, y + 178);
+  // 波形条，跟着音乐跳
+  for (let i = 0; i < 26; i++) { const v = energyAt(TL.energy, t + i * 0.05); ctx.fillStyle = "rgba(200,100,58,.8)"; ctx.fillRect(x + 470 + i * 6, y + 190 - v * 40 - 4, 3, v * 40 + 4); }
+  ctx.restore();
+}
+function endCard(t) {
+  const a = win(t, T.end + 0.2, TL.duration - 0.5, 2);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#f4efe6"; ctx.shadowColor = "rgba(255,190,130,.5)"; ctx.shadowBlur = 26;
+  ctx.font = '700 96px "Noto Serif SC", serif'; ctx.letterSpacing = "20px"; ctx.fillText("余烬与永恒", 970, 560);
+  ctx.shadowBlur = 0; ctx.font = '400 24px "Noto Serif SC", serif'; ctx.letterSpacing = "4px"; ctx.fillStyle = "rgba(244,239,230,.7)";
+  ctx.fillText("音乐：乙白 · Suno.cn　　故事与配音：AI 生成", 962, 650);
+  ctx.restore();
+}
+
+// ---------- 字幕 ----------
+function subtitles(t) {
+  for (const l of LINES) {
+    if (t < l.start - 0.25 || t > l.end + 0.35) continue;
+    const a = Math.min(ss(l.start - 0.25, l.start + 0.1, t), 1 - ss(l.end, l.end + 0.35, t));
+    ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = '500 46px "Noto Serif SC", serif'; ctx.letterSpacing = "3px";
+    ctx.shadowColor = "rgba(0,0,0,.85)"; ctx.shadowBlur = 10; ctx.fillStyle = "#fbf8f2";
+    ctx.fillText(l.text, W / 2 + 2, H - 150);
+    ctx.restore();
+  }
+}
+
+function renderAt(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  // 余烬熄灭的那几秒，连星星也暗下去；88 秒之后重新亮起
+  const dark = win(t, T.out + 0.6, T.hit, 0.8);
+  const skyBright = (0.75 + 0.35 * energyAt(TL.energy, t)) * (1 - 0.85 * dark) * (1 + 0.6 * ss(T.sky, T.star + 2, t));
+  starfield(t, skyBright);
+  ashes(t);
+  journey(t);
+  windStreaks(t);
+  seedAndLife(t);
+  ascent(t);
+  drawEmber(t, emberState(t));
+  introCard(t);
+  endCard(t);
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(1 - ss(0, 1.5, t), ss(TL.duration - 2.5, TL.duration, t))})`; ctx.fillRect(0, 0, W, H);
+  subtitles(t);
+}
+window.renderAt = renderAt;
+window.ready = document.fonts.load('500 46px "Noto Serif SC"').then(() => document.fonts.load('700 96px "Noto Serif SC"')).then(() => { renderAt(0); return true; });
+</script>
+</body>
+</html>
