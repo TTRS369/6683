@@ -19,7 +19,7 @@ const SEG = fs.mkdtempSync(path.join(require('os').tmpdir(), 'eternity-'));
     await p.goto('file://' + PAGE);
     await p.evaluate(() => window.ready);
     const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-',
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', String(FPS), path.join(SEG, `seg${w}.mp4`)], { stdio: ['pipe', 'inherit', 'inherit'] });
+      '-c:v', 'libx264', '-preset', process.env.PRESET || 'medium', '-crf', process.env.CRF || '20', '-pix_fmt', 'yuv420p', '-r', String(FPS), path.join(SEG, `seg${w}.mp4`)], { stdio: ['pipe', 'inherit', 'inherit'] });
     const done = new Promise(r => ff.on('close', r));
     const end = Math.min(TOTAL, (w + 1) * chunk);
     for (let f = w * chunk; f < end; f++) {
