@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A Little Room for You</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// 《A Little Room for You》故事 MV：逐帧确定性渲染。段落、逐句歌词、音效事件由 window.TIMELINE 注入。
+// 这次画面以氛围为主：慢镜头推移、光线和季节的变化，不逐句图解歌词。
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const TL = window.TIMELINE;
+const S = TL.sections, LYRICS = TL.lyrics, EV = TL.events;
+
+// ---------- 工具 ----------
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ss = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
+const lerp = (a, b, p) => a + (b - a) * p;
+const win = (t, a, b, f = 1) => ss(a, a + f, t) * (1 - ss(b - f, b, t));
+const mod = (a, n) => ((a % n) + n) % n;
+const prog = (k, t) => clamp((t - S[k][0]) / (S[k][1] - S[k][0]));
+const mixc = (a, b, p) => a.map((v, i) => Math.round(lerp(v, b[i], p)));
+const rgb = (a, al = 1) => `rgba(${a[0]},${a[1]},${a[2]},${al})`;
+function glow(c, x, y, r, col, a) {
+  if (r <= 0 || a <= 0) return;
+  const g = c.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.45, `rgba(${col},${a * 0.3})`); g.addColorStop(1, `rgba(${col},0)`);
+  c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill();
+}
+function vgrad(c, x, y, w, h, stops) { const g = c.createLinearGradient(0, y, 0, y + h); stops.forEach(([p, col]) => g.addColorStop(p, col)); c.fillStyle = g; c.fillRect(x, y, w, h); }
+// 慢镜头：在 [t0,t1] 里从 (x0,y0,z0) 缓缓移到 (x1,y1,z1)
+function camera(c, t, t0, t1, a, b) {
+  const p = ss(t0, t1, t) * 0.5 + clamp((t - t0) / (t1 - t0)) * 0.5;
+  const z = Math.max(1, lerp(a[2], b[2], p)), hw = W / 2 / z, hh = H / 2 / z;
+  // 镜头不能移出画面范围，否则边缘会露黑
+  const x = clamp(lerp(a[0], b[0], p), hw, W - hw), y = clamp(lerp(a[1], b[1], p), hh, H - hh);
+  c.translate(W / 2, H / 2); c.scale(z, z); c.translate(-x, -y);
+}
+
+// ---------- 人物：老先生（原创） ----------
+// 原点在双脚中间的地面。pose: stand | sit | walk；face 1 朝右 / -1 朝左；head: 头部转动（-1 回头 ~ 0 正常）；arm: 手臂动作
+function oldMan(c, x, y, s, o = {}) {
+  const face = o.face ?? 1, pose = o.pose || "stand", t = o.t || 0;
+  const skin = "#e6c4a2", hair = "#d8d4cc", cardigan = "#c4ae84", shirt = "#7a8a9a", trousers = "#4e4438", shoe = "#2a2420";
+  c.save(); c.translate(x, y); c.scale(s * face, s);
+  const walk = pose === "walk" ? o.walk : null;
+  const breathe = Math.sin(t * 1.6) * 1.2;
+  if (pose === "sit") {
+    // 腿：大腿水平向前，小腿垂下
+    c.fillStyle = trousers; c.beginPath(); c.roundRect(-18, -92, 70, 24, 10); c.fill();
+    c.beginPath(); c.roundRect(34, -84, 20, 80, 8); c.fill();
+    c.fillStyle = shoe; c.beginPath(); c.roundRect(32, -8, 34, 10, 5); c.fill();
+    c.translate(0, -78);
+  } else {
+    const sw = walk == null ? 0 : Math.sin(walk) * 16;
+    c.fillStyle = trousers;
+    for (const k of [-1, 1]) { c.save(); c.translate(0, -92); c.rotate((k * sw) * Math.PI / 180 * 1.4); c.beginPath(); c.roundRect(-11, 0, 22, 90, 9); c.fill(); c.fillStyle = shoe; c.beginPath(); c.roundRect(-10, 84, 32, 10, 5); c.fill(); c.restore(); }
+    c.translate(0, -88);
+  }
+  // 身体（微驼），呼吸起伏
+  c.save(); c.rotate(0.08);
+  c.fillStyle = shirt; c.beginPath(); c.roundRect(-24, -118 + breathe, 50, 120, 18); c.fill();
+  c.fillStyle = cardigan; c.beginPath(); c.roundRect(-28, -120 + breathe, 58, 124, 20); c.fill();
+  c.fillStyle = "rgba(0,0,0,.08)"; c.fillRect(8, -110 + breathe, 3, 110);
+  // 手臂
+  const arm = o.arm ?? (walk == null ? 0.1 : Math.sin(walk) * 0.35);
+  c.save(); c.translate(4, -104 + breathe); c.rotate(arm);
+  c.fillStyle = cardigan; c.beginPath(); c.roundRect(-10, 0, 20, 86, 9); c.fill();
+  c.fillStyle = skin; c.beginPath(); c.arc(0, 90, 9, 0, TAU); c.fill();
+  if (o.hold === "bag") { c.fillStyle = "#d8c8a0"; c.beginPath(); c.roundRect(-20, 92, 40, 46, 6); c.fill(); c.fillStyle = "#6a9a5a"; c.beginPath(); c.arc(-6, 92, 8, 0, TAU); c.fill(); }
+  if (o.hold === "phone") { c.fillStyle = "#1a1a1e"; c.fillRect(-6, 80, 14, 22); }
+  if (o.hold === "cloth") { c.fillStyle = "#e8e2d6"; c.beginPath(); c.roundRect(-12, 86, 26, 16, 4); c.fill(); }
+  c.restore();
+  // 头
+  c.save(); c.translate(6, -134 + breathe); c.rotate(-0.05 + (o.nod || 0));
+  if (o.head) c.scale(1 - Math.abs(o.head) * 0.25, 1);
+  c.fillStyle = skin; c.beginPath(); c.ellipse(0, 0, 25, 29, 0, 0, TAU); c.fill();
+  c.beginPath(); c.arc(24, 4, 6, 0, TAU); c.fill();                     // 鼻子
+  c.fillStyle = hair; c.beginPath(); c.ellipse(-8, -12, 24, 20, -0.3, Math.PI * 0.85, Math.PI * 2.05); c.fill();
+  c.beginPath(); c.ellipse(-18, 6, 9, 16, 0, 0, TAU); c.fill();
+  c.strokeStyle = "#5a5048"; c.lineWidth = 2; c.beginPath(); c.arc(12, -2, 7, 0, TAU); c.moveTo(5, -2); c.lineTo(-14, -4); c.stroke();  // 眼镜
+  c.strokeStyle = "#8a6a5a"; c.lineWidth = 2;
+  c.beginPath(); if (o.smile) c.arc(14, 12, 6, 0.2, Math.PI - 0.4); else { c.moveTo(10, 15); c.lineTo(18, 15); } c.stroke();
+  c.restore();
+  c.restore();
+  c.restore();
+}
+// 她：只是一团带着红外套轮廓的暖光
+function her(c, x, y, s, a, pose = "stand") {
+  if (a <= 0) return;
+  c.save(); c.globalAlpha = a; c.translate(x, y); c.scale(s, s);
+  c.globalCompositeOperation = "lighter";
+  glow(c, 0, pose === "sit" ? -110 : -150, 200, "255,200,150", 0.35);
+  c.globalCompositeOperation = "source-over";
+  c.filter = "blur(6px)";
+  c.fillStyle = "rgba(190,80,70,.55)";
+  if (pose === "sit") { c.beginPath(); c.roundRect(-30, -150, 62, 110, 26); c.fill(); c.beginPath(); c.roundRect(-10, -60, 70, 26, 12); c.fill(); }
+  else { c.beginPath(); c.moveTo(-30, -190); c.quadraticCurveTo(0, -205, 30, -190); c.lineTo(44, -20); c.lineTo(-44, -20); c.closePath(); c.fill(); }
+  c.fillStyle = "rgba(255,225,195,.55)"; c.beginPath(); c.arc(0, pose === "sit" ? -178 : -222, 24, 0, TAU); c.fill();
+  c.filter = "none";
+  c.restore();
+}
+
+// ---------- 客厅（大多数场景都在这里，用光线和季节区分） ----------
+// mood: morning | rainy | evening | winter | night | spring
+const MOODS = {
+  morning: { wall: [214, 196, 168], light: "255,226,180", sky: [[0, "#bcd6e8"], [1, "#f4e6cc"]], lamp: 0, sun: 0.7 },
+  rainy:   { wall: [150, 146, 140], light: "200,210,225", sky: [[0, "#6a7686"], [1, "#9aa2aa"]], lamp: 0.2, sun: 0 },
+  evening: { wall: [150, 112, 92], light: "255,170,110", sky: [[0, "#4a4a72"], [1, "#e89a6a"]], lamp: 0.8, sun: 0.3 },
+  winter:  { wall: [150, 156, 170], light: "220,230,255", sky: [[0, "#8a9ab0"], [1, "#d8e0ea"]], lamp: 0.6, sun: 0 },
+  night:   { wall: [48, 52, 72], light: "170,190,255", sky: [[0, "#0a1024"], [1, "#22284a"]], lamp: 0, sun: 0 },
+  spring:  { wall: [224, 206, 172], light: "255,232,185", sky: [[0, "#a8d0f0"], [1, "#f6ecd2"]], lamp: 0, sun: 1 },
+};
+const WINX = 1060, WINY = 210, WINW = 460, WINH = 470, DOOR = 210, FLOOR = 880, HER_CHAIR = 1640, HIS_CHAIR = 860;
+
+function room(c, t, mood, o = {}) {
+  const m = MOODS[mood];
+  vgrad(c, 0, 0, W, FLOOR, [[0, rgb(mixc(m.wall, [0, 0, 0], 0.15))], [1, rgb(m.wall)]]);
+  // 墙纸细纹
+  c.fillStyle = "rgba(255,255,255,.035)"; for (let x = 0; x < W; x += 48) c.fillRect(x, 0, 18, FLOOR);
+  // 窗外
+  c.save(); c.beginPath(); c.rect(WINX, WINY, WINW, WINH); c.clip();
+  vgrad(c, WINX, WINY, WINW, WINH, m.sky);
+  outside(c, t, mood, o);
+  c.restore();
+  // 窗框、窗帘
+  c.fillStyle = "#f0e8da"; c.fillRect(WINX - 14, WINY - 14, WINW + 28, 14); c.fillRect(WINX - 14, WINY + WINH, WINW + 28, 22); c.fillRect(WINX - 14, WINY, 14, WINH); c.fillRect(WINX + WINW, WINY, 14, WINH); c.fillRect(WINX + WINW / 2 - 5, WINY, 10, WINH);
+  const sway = (o.breeze || 0) * Math.sin(t * 1.3) * 14;
+  for (const side of [0, 1]) {
+    const cx0 = side ? WINX + WINW + 10 : WINX - 90;
+    c.fillStyle = "rgba(196,120,100,.75)"; c.beginPath(); c.moveTo(cx0, WINY - 40); c.lineTo(cx0 + 80, WINY - 40);
+    c.quadraticCurveTo(cx0 + 70 + sway * (side ? -1 : 1), WINY + WINH / 2, cx0 + 86 + sway * (side ? -1.4 : 1.4), WINY + WINH + 30); c.lineTo(cx0 - 6, WINY + WINH + 30); c.closePath(); c.fill();
+  }
+  // 光从窗口照进来
+  c.globalCompositeOperation = "lighter";
+  if (m.sun > 0) { const g = c.createLinearGradient(WINX, WINY, WINX - 300, FLOOR + 200); g.addColorStop(0, `rgba(${m.light},${0.18 * m.sun})`); g.addColorStop(1, `rgba(${m.light},0)`); c.fillStyle = g; c.beginPath(); c.moveTo(WINX, WINY); c.lineTo(WINX + WINW, WINY); c.lineTo(WINX + WINW - 200, H); c.lineTo(WINX - 520, H); c.fill(); }
+  for (let i = 0; i < 40; i++) { const q = rng(50 + i), x = WINX - 300 + q() * 700 + Math.sin(t * 0.3 + i) * 20, y = WINY + q() * 600 + Math.cos(t * 0.2 + i) * 14; c.fillStyle = `rgba(${m.light},${(0.15 + q() * 0.25) * (m.sun + 0.2)})`; c.fillRect(x, y, 2, 2); }
+  c.globalCompositeOperation = "source-over";
+  // 地板
+  vgrad(c, 0, FLOOR, W, H - FLOOR, [[0, rgb(mixc([120, 90, 66], m.wall, 0.2))], [1, rgb(mixc([70, 52, 40], [0, 0, 0], 0.3))]]);
+  c.strokeStyle = "rgba(0,0,0,.08)"; c.lineWidth = 2; for (let x = 0; x < W; x += 140) { c.beginPath(); c.moveTo(x, FLOOR); c.lineTo(x - 60, H); c.stroke(); }
+  // 门和挂着的红外套
+  c.fillStyle = rgb(mixc([120, 90, 70], m.wall, 0.25)); c.fillRect(DOOR - 100, 260, 200, FLOOR - 260);
+  c.fillStyle = "rgba(0,0,0,.12)"; c.fillRect(DOOR - 82, 290, 164, 260); c.fillRect(DOOR - 82, 580, 164, 270);
+  c.fillStyle = "#c8a060"; c.beginPath(); c.arc(DOOR + 70, 580, 7, 0, TAU); c.fill();
+  c.fillStyle = "#6a5040"; c.fillRect(DOOR + 120, 330, 70, 8);
+  coat(c, DOOR + 170, 338, o.coatSway || 0, t);
+  // 墙上的钟
+  c.fillStyle = "#5a4636"; c.beginPath(); c.arc(560, 280, 52, 0, TAU); c.fill();
+  c.fillStyle = "#f2ead8"; c.beginPath(); c.arc(560, 280, 44, 0, TAU); c.fill();
+  c.strokeStyle = "#3a2a20"; c.lineWidth = 3; c.lineCap = "round";
+  const sec = Math.floor(t) * TAU / 60;
+  c.beginPath(); c.moveTo(560, 280); c.lineTo(560 + Math.sin(t / 600) * 22, 280 - Math.cos(t / 600) * 22); c.moveTo(560, 280); c.lineTo(560 + Math.sin(t / 50) * 34, 280 - Math.cos(t / 50) * 34); c.stroke();
+  c.strokeStyle = "#a83a2a"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(560, 280); c.lineTo(560 + Math.sin(sec) * 38, 280 - Math.cos(sec) * 38); c.stroke();
+  // 书架和相框
+  c.fillStyle = "#5a4232"; c.fillRect(420, 470, 300, 12); c.fillRect(420, 600, 300, 12);
+  const br = rng(9); for (let i = 0; i < 10; i++) { c.fillStyle = ["#8a5a4a", "#5a6a5a", "#a08a5a", "#4a5a7a"][i % 4]; const bh = 60 + br() * 50; c.fillRect(440 + i * 26, 600 - bh, 20, bh); }
+  c.fillStyle = "#3a2a20"; c.fillRect(600, 400, 70, 70); c.fillStyle = "#d8c8b0"; c.fillRect(606, 406, 58, 58);
+  c.fillStyle = "rgba(190,90,80,.6)"; c.beginPath(); c.arc(624, 430, 9, 0, TAU); c.arc(646, 432, 9, 0, TAU); c.fill();   // 合照里的两个人
+  // 落地灯
+  c.fillStyle = "#3a3030"; c.fillRect(1590 - 60, 520, 6, FLOOR - 520);
+  c.fillStyle = "#e8d6b0"; c.beginPath(); c.moveTo(1590 - 100, 520); c.lineTo(1590 - 20, 520); c.lineTo(1590 - 34, 460); c.lineTo(1590 - 86, 460); c.fill();
+  if (m.lamp > 0) { c.globalCompositeOperation = "lighter"; glow(c, 1530, 540, 420, "255,190,120", 0.35 * m.lamp); c.globalCompositeOperation = "source-over"; }
+  // 两把椅子：他的在桌边，她的在窗边
+  armchair(c, HER_CHAIR, FLOOR, o.herChairClean ?? 0);
+  table(c, 980, FLOOR, o);
+  woodChair(c, HIS_CHAIR, FLOOR);
+}
+function coat(c, x, y, sway, t) {
+  c.save(); c.translate(x, y); c.rotate(sway * Math.sin(t * 2) * 0.04);
+  c.fillStyle = "#a8433c"; c.beginPath(); c.moveTo(-6, 0); c.quadraticCurveTo(-40, 10, -46, 60); c.lineTo(-52, 230); c.lineTo(52, 230); c.lineTo(46, 60); c.quadraticCurveTo(40, 10, 6, 0); c.closePath(); c.fill();
+  c.fillStyle = "#8a3530"; c.beginPath(); c.moveTo(-6, 4); c.lineTo(-22, 60); c.lineTo(0, 70); c.lineTo(22, 60); c.lineTo(6, 4); c.fill();
+  c.fillStyle = "#e0c070"; for (const by of [100, 140, 180]) { c.beginPath(); c.arc(8, by, 3.5, 0, TAU); c.fill(); }
+  c.restore();
+}
+function armchair(c, x, y, clean) {
+  const col = mixc([150, 120, 100], [190, 150, 120], clean);
+  c.fillStyle = rgb(mixc(col, [0, 0, 0], 0.2)); c.beginPath(); c.roundRect(x - 110, y - 250, 220, 190, 30); c.fill();
+  c.fillStyle = rgb(col); c.beginPath(); c.roundRect(x - 120, y - 120, 240, 80, 20); c.fill();
+  c.beginPath(); c.roundRect(x - 140, y - 170, 44, 140, 18); c.fill(); c.beginPath(); c.roundRect(x + 96, y - 170, 44, 140, 18); c.fill();
+  c.fillStyle = "#3a2a20"; c.fillRect(x - 110, y - 40, 14, 40); c.fillRect(x + 96, y - 40, 14, 40);
+  if (clean > 0) { c.globalCompositeOperation = "lighter"; glow(c, x, y - 160, 220, "255,230,190", 0.18 * clean); c.globalCompositeOperation = "source-over"; }
+}
+function woodChair(c, x, y) {
+  c.fillStyle = "#6a4a34"; c.fillRect(x - 50, y - 120, 100, 14); c.fillRect(x - 46, y - 106, 10, 106); c.fillRect(x + 36, y - 106, 10, 106);
+  c.fillRect(x - 50, y - 260, 12, 140); c.fillRect(x - 50, y - 260, 70, 12);
+}
+function table(c, x, y, o) {
+  c.fillStyle = "#7a5a40"; c.fillRect(x - 10, y - 160, 260, 16); c.fillStyle = "#5a4030"; c.fillRect(x + 10, y - 144, 14, 144); c.fillRect(x + 216, y - 144, 14, 144);
+  // 桌上的杯子：平时一只；春天早上变成两只
+  const cups = o.cups ?? 1;
+  for (let i = 0; i < Math.ceil(cups); i++) {
+    const cx = x + 70 + i * 70, a = clamp(cups - i);
+    c.globalAlpha = a; c.fillStyle = i ? "#c8644e" : "#f0ece4"; c.beginPath(); c.roundRect(cx - 18, y - 200, 36, 40, 6); c.fill();
+    c.strokeStyle = c.fillStyle; c.lineWidth = 4; c.beginPath(); c.arc(cx + 20, y - 182, 9, -1.2, 1.2); c.stroke();
+    if (o.steam) { c.strokeStyle = `rgba(255,255,255,${0.25 * a})`; c.lineWidth = 2; c.beginPath(); for (let k = 0; k < 20; k++) c.lineTo(cx + Math.sin(k * 0.5 + (o.t || 0) * 2 + i) * 5, y - 206 - k * 3); c.stroke(); }
+    c.globalAlpha = 1;
+  }
+  if (o.flowers) { const a = o.flowers; c.globalAlpha = a; c.fillStyle = "#9ab8c8"; c.beginPath(); c.roundRect(x + 190, y - 214, 30, 54, 8); c.fill(); for (let k = 0; k < 5; k++) { c.strokeStyle = "#5a8a4a"; c.lineWidth = 2; c.beginPath(); c.moveTo(x + 205, y - 212); c.lineTo(x + 190 + k * 8, y - 262 - (k % 2) * 14); c.stroke(); c.fillStyle = ["#f6d0d8", "#fff2b0", "#ffffff", "#f4b8c4", "#e8d8ff"][k]; c.beginPath(); c.arc(x + 190 + k * 8, y - 262 - (k % 2) * 14, 9, 0, TAU); c.fill(); } c.globalAlpha = 1; }
+}
+// 窗外：随季节和天气变化
+function outside(c, t, mood, o) {
+  // 对面的楼
+  const r = rng(77);
+  for (let i = 0; i < 6; i++) {
+    const bx = WINX - 20 + i * 90, bh = 180 + r() * 180;
+    c.fillStyle = mood === "night" ? "#151a30" : mood === "evening" ? "#6a5068" : mood === "rainy" ? "#7a808a" : "#c8c0b8";
+    c.fillRect(bx, WINY + WINH - bh, 80, bh);
+    for (let wy = WINY + WINH - bh + 20; wy < WINY + WINH - 20; wy += 40) for (let wx = bx + 12; wx < bx + 70; wx += 26) { const lit = r() < (mood === "night" || mood === "evening" ? 0.5 : 0.1); c.fillStyle = lit ? "rgba(255,210,140,.8)" : "rgba(0,0,0,.12)"; c.fillRect(wx, wy, 14, 22); }
+  }
+  // 树枝：冬天光秃，春天开花
+  const bloom = o.bloom ?? (mood === "spring" ? 1 : 0);
+  c.strokeStyle = mood === "night" ? "#0a0c18" : "#5a4a40"; c.lineWidth = 8; c.lineCap = "round";
+  c.beginPath(); c.moveTo(WINX + WINW + 20, WINY + 120); c.quadraticCurveTo(WINX + 300, WINY + 140, WINX + 180, WINY + 90); c.stroke();
+  c.lineWidth = 4; c.beginPath(); c.moveTo(WINX + 320, WINY + 135); c.lineTo(WINX + 260, WINY + 60); c.moveTo(WINX + 240, WINY + 110); c.lineTo(WINX + 200, WINY + 150); c.stroke();
+  if (bloom > 0) { const br = rng(88); for (let i = 0; i < 40; i++) { const k = clamp(bloom * 1.5 - br() * 0.5); if (k <= 0) continue; c.fillStyle = `rgba(255,${200 + br() * 30 | 0},${215 + br() * 20 | 0},${0.9 * k})`; c.beginPath(); c.arc(WINX + 180 + br() * 300, WINY + 50 + br() * 110, 7 * k, 0, TAU); c.fill(); } }
+  if (mood === "winter" || o.snow) { const a = o.snow ?? 1; for (let i = 0; i < 90; i++) { const q = rng(300 + i), x = WINX + mod(q() * WINW + Math.sin(t + i) * 12, WINW), y = WINY + mod(q() * WINH + t * (30 + q() * 30), WINH); c.fillStyle = `rgba(255,255,255,${0.8 * a})`; c.beginPath(); c.arc(x, y, 2 + q() * 2, 0, TAU); c.fill(); } }
+  if (mood === "night") { c.fillStyle = "#f2eed8"; c.beginPath(); c.arc(WINX + 360, WINY + 90, 30, 0, TAU); c.fill(); c.globalCompositeOperation = "lighter"; glow(c, WINX + 360, WINY + 90, 140, "200,210,255", 0.3); c.globalCompositeOperation = "source-over"; }
+  if (mood === "rainy") { c.strokeStyle = "rgba(220,230,245,.45)"; c.lineWidth = 1.5; for (let i = 0; i < 70; i++) { const q = rng(400 + i), x = WINX + mod(q() * WINW + t * 30, WINW), y = WINY + mod(q() * WINH + t * 600, WINH); c.beginPath(); c.moveTo(x, y); c.lineTo(x - 4, y + 18); c.stroke(); } }
+  if (mood === "spring" || mood === "morning") birds(c, t, WINX, WINY, WINW);
+}
+function birds(c, t, x0, y0, w) {
+  c.strokeStyle = "rgba(60,60,70,.7)"; c.lineWidth = 2.5;
+  for (let i = 0; i < 3; i++) { const x = x0 + mod(t * (26 + i * 8) + i * 160, w + 80) - 40, y = y0 + 70 + i * 30 + Math.sin(t * 1.5 + i) * 10, f = Math.sin(t * 9 + i) * 6; c.beginPath(); c.moveTo(x - 10, y - f); c.quadraticCurveTo(x - 4, y - 2, x, y); c.quadraticCurveTo(x + 4, y - 2, x + 10, y - f); c.stroke(); }
+}
+
+// ---------- 场景 ----------
+// 1. 早晨：屋里只剩一个人。镜头从门边那件外套慢慢移到桌边的他
+function sMorning(c, t) {
+  c.save(); camera(c, t, 0, S.pre1[0], [520, 520, 1.35], [1080, 600, 1.12]);
+  room(c, t, "morning", { cups: 1, steam: 1, t });
+  oldMan(c, HIS_CHAIR + 10, FLOOR, 1.15, { pose: "sit", t, arm: -0.9 + Math.sin(t * 0.5) * 0.05 });
+  c.restore();
+  titleCard(c, t, 2.5, S.v1[0] + 1.5, "A Little Room for You", "");
+}
+// 2. 窗外：世界照常运转。车流、行人、下起雨；玻璃上映着他的轮廓
+function sWindow(c, t) {
+  const p = prog("pre1", t), rain = ss(S.pre1[0] + 3, S.pre1[0] + 8, t);
+  c.save(); camera(c, t, S.pre1[0], S.ch1[0], [960, 520, 1.0], [960, 560, 1.06]);
+  vgrad(c, 0, 0, W, H, [[0, rgb(mixc([170, 196, 214], [110, 120, 134], rain))], [1, rgb(mixc([232, 222, 204], [150, 152, 156], rain))]]);
+  // 街景
+  const r = rng(12);
+  for (let i = 0; i < 9; i++) { const bx = i * 230 - 40, bh = 380 + r() * 300; c.fillStyle = rgb(mixc([196, 186, 176], [120, 124, 134], rain)); c.fillRect(bx, 760 - bh, 210, bh); for (let wy = 760 - bh + 30; wy < 740; wy += 56) for (let wx = bx + 20; wx < bx + 190; wx += 44) { c.fillStyle = r() < 0.2 + rain * 0.3 ? "rgba(255,214,150,.75)" : "rgba(0,0,0,.1)"; c.fillRect(wx, wy, 22, 32); } }
+  c.fillStyle = "#5a5c62"; c.fillRect(0, 760, W, 200); c.fillStyle = "#8a8a8a"; c.fillRect(0, 740, W, 20);
+  c.fillStyle = "rgba(255,255,255,.5)"; for (let x = 0; x < W; x += 160) c.fillRect(x, 850, 80, 6);
+  // 车：每辆在事件时刻经过画面中央
+  EV.cars.forEach((tc, i) => {
+    const dir = i % 2 ? -1 : 1, x = W / 2 + (t - tc) * 520 * dir, y = i % 2 ? 800 : 880;
+    if (x < -300 || x > W + 300) return;
+    c.save(); c.translate(x, y); c.scale(dir, 1);
+    c.fillStyle = ["#3a5a7a", "#9a3a32", "#e8e2d4", "#2a2a2e"][i]; c.beginPath(); c.roundRect(-110, -60, 220, 50, 14); c.fill(); c.beginPath(); c.roundRect(-60, -96, 120, 44, 14); c.fill();
+    c.fillStyle = "rgba(180,210,230,.7)"; c.fillRect(-48, -88, 44, 30); c.fillRect(6, -88, 44, 30);
+    c.fillStyle = "#1a1a1a"; c.beginPath(); c.arc(-64, -10, 20, 0, TAU); c.arc(64, -10, 20, 0, TAU); c.fill();
+    c.globalCompositeOperation = "lighter"; glow(c, 112, -40, 60, "255,240,200", 0.5 * (0.4 + rain)); c.globalCompositeOperation = "source-over";
+    c.restore();
+  });
+  // 撑伞的行人
+  for (let i = 0; i < 5; i++) { const q = rng(60 + i), x = mod(q() * W + t * (40 + q() * 30) * (i % 2 ? 1 : -1), W + 200) - 100, y = 740; c.fillStyle = "#3a3a40"; c.fillRect(x - 8, y - 70, 16, 70); c.fillStyle = "#3a3a40"; c.beginPath(); c.arc(x, y - 80, 10, 0, TAU); c.fill(); if (rain > 0.2) { c.fillStyle = ["#2a4a6a", "#7a2a3a", "#3a5a3a", "#5a4a2a", "#222"][i]; c.beginPath(); c.arc(x, y - 92, 40, Math.PI, 0); c.fill(); } }
+  // 雨
+  if (rain > 0) { c.strokeStyle = `rgba(230,236,245,${0.4 * rain})`; c.lineWidth = 1.5; for (let i = 0; i < 260; i++) { const q = rng(700 + i), x = mod(q() * W + t * 60, W), y = mod(q() * H + t * 900, H); c.beginPath(); c.moveTo(x, y); c.lineTo(x - 5, y + 24); c.stroke(); } }
+  // 玻璃上的倒影和水珠
+  c.save(); c.globalAlpha = 0.16; oldMan(c, 1340, 1060, 2.6, { pose: "stand", face: -1, t }); c.restore();
+  for (let i = 0; i < 70 * rain; i++) { const q = rng(800 + i), x = q() * W, y = mod(q() * H + t * (12 + q() * 30) * q(), H); c.fillStyle = "rgba(230,240,255,.35)"; c.beginPath(); c.ellipse(x, y, 4, 6, 0, 0, TAU); c.fill(); }
+  // 窗框
+  c.fillStyle = "#eee6d8"; c.fillRect(0, 0, W, 40); c.fillRect(0, 0, 40, H); c.fillRect(W - 40, 0, 40, H); c.fillRect(W / 2 - 10, 0, 20, H); c.fillRect(0, H - 40, W, 40);
+  c.restore();
+}
+// 3. 雨天的下午到傍晚：他坐着，回忆里两个人慢慢跳过一支舞
+function sMemory(c, t) {
+  const p = prog("ch1", t), mood = p < 0.55 ? "rainy" : "evening";
+  c.save(); camera(c, t, S.ch1[0], S.v2[0], [1200, 600, 1.05], [1320, 620, 1.18]);
+  room(c, t, mood, {});
+  if (p > 0.45 && p < 0.65) { c.globalAlpha = win(p, 0.45, 0.65, 0.08); room(c, t, p < 0.55 ? "evening" : "rainy", {}); c.globalAlpha = 1; }
+  oldMan(c, HIS_CHAIR + 10, FLOOR, 1.15, { pose: "sit", t, arm: 0.2, nod: Math.sin(t * 0.4) * 0.03 });
+  // 回忆：两团人影在屋子中间慢慢转圈
+  const mem = win(t, S.ch1[0] + 9, S.ch1[0] + 22, 2.5);
+  if (mem > 0) {
+    const a = (t - S.ch1[0]) * 0.5;
+    her(c, 1280 + Math.cos(a) * 40, FLOOR - 10, 1.05, 0.7 * mem);
+    c.save(); c.globalAlpha = 0.35 * mem; c.filter = "blur(5px)"; oldMan(c, 1180 - Math.cos(a) * 40, FLOOR - 10, 1.1, { pose: "stand", t, face: 1, arm: -0.8 }); c.restore();
+  }
+  c.restore();
+}
+// 4. 超市排队：身后有人笑，那一秒他回过头
+function sStore(c, t) {
+  c.save(); camera(c, t, S.v2[0], S.pre2[0], [960, 560, 1.0], [1000, 590, 1.12]);
+  vgrad(c, 0, 0, W, H, [[0, "#e8ece6"], [1, "#d6d8d0"]]);
+  // 货架
+  for (let sh = 0; sh < 3; sh++) {
+    const y0 = 180 + sh * 170, r = rng(30 + sh);
+    c.fillStyle = "#b8bcb4"; c.fillRect(80, y0 + 130, W - 160, 12);
+    for (let x = 90; x < W - 100; x += 34 + r() * 20) { const h = 60 + r() * 60; c.fillStyle = ["#d86a4a", "#e8c04a", "#5a9ad8", "#6ab86a", "#e88aa8", "#f0f0e8"][r() * 6 | 0]; c.fillRect(x, y0 + 130 - h, 26 + r() * 10, h); }
+  }
+  c.filter = "blur(3px)"; c.fillStyle = "rgba(255,255,255,.0)"; c.filter = "none";
+  // 天花板灯
+  c.globalCompositeOperation = "lighter"; for (let x = 200; x < W; x += 400) glow(c, x, 60, 300, "255,250,230", 0.25); c.globalCompositeOperation = "source-over";
+  c.fillStyle = "#c8c4b8"; c.fillRect(0, 800, W, H - 800);
+  // 收银台
+  c.fillStyle = "#6a6e74"; c.fillRect(1380, 700, 400, 120); c.fillStyle = "#2a2e34"; c.fillRect(1600, 620, 80, 70);
+  // 排在前面的人
+  for (let i = 0; i < 2; i++) { const x = 1240 - i * 160; c.fillStyle = ["#5a6a7a", "#7a6a5a"][i]; c.beginPath(); c.roundRect(x - 34, 590, 68, 220, 20); c.fill(); c.beginPath(); c.arc(x, 560, 30, 0, TAU); c.fill(); }
+  // 身后走过的人：笑的时候肩膀在抖，穿着和她很像的红色外套
+  const tl0 = EV.laugh - 2, walkX = lerp(260, -200, clamp((t - EV.turn) / 4)), shake = win(t, EV.laugh, EV.laugh + 2.2, 0.2) * Math.sin(t * 22) * 3;
+  if (t > tl0) {
+    c.save(); c.filter = "blur(2.5px)"; c.globalAlpha = ss(tl0, tl0 + 1, t);
+    c.fillStyle = "#a8433c"; c.beginPath(); c.roundRect(walkX - 36, 580 + shake, 72, 230, 24); c.fill();
+    c.fillStyle = "#e6c4a2"; c.beginPath(); c.arc(walkX, 548 + shake, 26, 0, TAU); c.fill();
+    c.fillStyle = "#4a3428"; c.beginPath(); c.ellipse(walkX - 6, 536 + shake, 28, 22, 0, Math.PI, 0); c.fill();
+    c.restore();
+  }
+  // 他：拎着购物篮排队；那一秒回头
+  const turn = win(t, EV.turn, EV.turn + 3.8, 0.5);
+  oldMan(c, 860, 810, 1.25, { pose: "stand", face: turn > 0.5 ? -1 : 1, t, hold: "bag", head: turn > 0.5 ? 0 : -turn * 0.6 });
+  c.restore();
+  // 回头那一刻，周围的颜色暗下去，只剩他
+  const hush = win(t, EV.turn, EV.turn + 3.8, 0.6);
+  if (hush > 0) { const g = c.createRadialGradient(860, 640, 120, 860, 640, 900); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, `rgba(20,18,24,${0.45 * hush})`); c.fillStyle = g; c.fillRect(0, 0, W, H); }
+}
+// 5. 秋天回家的路：落叶、路灯，他拎着袋子慢慢走
+function sWalk(c, t) {
+  const tt = t - S.pre2[0], off = tt * 60;
+  vgrad(c, 0, 0, W, H, [[0, "#6a7aa8"], [0.55, "#e8a878"], [1, "#f2c89a"]]);
+  c.globalCompositeOperation = "lighter"; glow(c, 1500, 640, 400, "255,190,120", 0.45); c.globalCompositeOperation = "source-over";
+  for (let layer = 0; layer < 2; layer++) {
+    const sp = layer ? 0.5 : 0.2, col = layer ? "#8a5a5a" : "#a87a72", base = layer ? 780 : 720;
+    c.fillStyle = col;
+    for (let i = -1; i < 12; i++) { const x = mod(i * 220 - off * sp, W + 440) - 220, h = 200 + ((i * 97) % 160); c.fillRect(x, base - h, 180, h); }
+  }
+  c.fillStyle = "#4a3e3a"; c.fillRect(0, 820, W, H - 820); c.fillStyle = "#7a6a62"; c.fillRect(0, 800, W, 22);
+  // 行道树和路灯
+  for (let i = -1; i < 8; i++) {
+    const x = mod(i * 320 - off, W + 640) - 320;
+    c.fillStyle = "#4a3428"; c.fillRect(x - 8, 560, 16, 250);
+    const r = rng(i * 7 + 3); for (let k = 0; k < 14; k++) { c.fillStyle = ["#d8763a", "#e8a03a", "#b84a2a", "#f0c050"][k % 4]; c.beginPath(); c.arc(x + (r() - 0.5) * 160, 520 + (r() - 0.5) * 110, 40 + r() * 20, 0, TAU); c.fill(); }
+    c.fillStyle = "#2a2a2e"; c.fillRect(x + 150, 500, 6, 310); c.fillStyle = "#fff0c8"; c.beginPath(); c.arc(x + 153, 496, 10, 0, TAU); c.fill();
+    c.globalCompositeOperation = "lighter"; glow(c, x + 153, 496, 120, "255,220,150", 0.35 * ss(S.pre2[0] + 4, S.pre2[0] + 9, t)); c.globalCompositeOperation = "source-over";
+  }
+  // 落叶
+  for (let i = 0; i < 50; i++) { const q = rng(900 + i), x = mod(q() * W - t * (40 + q() * 40) - off * 0.4, W), y = mod(q() * H + t * (50 + q() * 40), H); c.save(); c.translate(x, y); c.rotate(t * 2 + i); c.fillStyle = ["#d8763a", "#e8a03a", "#b84a2a"][i % 3]; c.beginPath(); c.ellipse(0, 0, 8, 4, 0, 0, TAU); c.fill(); c.restore(); }
+  oldMan(c, 860, 820, 1.25, { pose: "walk", walk: tt / EV.step * Math.PI, t, hold: "bag" });
+}
+// 6. 冬去春来：他理了理那件外套的领子，坐回去；窗外下雪，然后树枝冒出花苞
+function sSeasons(c, t) {
+  const p = prog("ch2", t), spring = ss(0.62, 0.92, p);
+  c.save(); camera(c, t, S.ch2[0], S.bridge[0], [500, 560, 1.25], [1150, 600, 1.05]);
+  room(c, t, spring > 0.5 ? "spring" : "winter", { snow: 1 - spring, bloom: spring * 0.4, coatSway: win(p, 0.05, 0.3, 0.05) });
+  if (spring > 0 && spring < 1) { c.globalAlpha = spring > 0.5 ? 1 - spring : spring; room(c, t, spring > 0.5 ? "winter" : "spring", { snow: 1 - spring, bloom: spring * 0.4 }); c.globalAlpha = 1; }
+  // 前半段：站在门边，伸手理一理外套；后半段坐回椅子
+  if (p < 0.38) oldMan(c, DOOR + 300, FLOOR, 1.15, { pose: "stand", face: -1, t, arm: -1.6 + Math.sin(t * 1.8) * 0.15 * win(p, 0.06, 0.3, 0.04) });
+  else oldMan(c, HIS_CHAIR + 10, FLOOR, 1.15, { pose: "sit", t, arm: 0.15 });
+  c.restore();
+}
+// 7. 夜里：月光下，他给她的号码发了一条消息
+function sNight(c, t) {
+  c.save(); camera(c, t, S.bridge[0], S.fin[0], [1150, 620, 1.15], [1000, 640, 1.3]);
+  room(c, t, "night", {});
+  oldMan(c, HIS_CHAIR + 10, FLOOR, 1.15, { pose: "sit", t, arm: -1.1, hold: "phone", nod: 0.08 });
+  c.globalCompositeOperation = "lighter"; glow(c, HIS_CHAIR + 40, FLOOR - 240, 160, "170,200,255", 0.4); c.globalCompositeOperation = "source-over";
+  c.restore();
+  // 手机屏幕（小窗）
+  const a = win(t, EV.typeStart - 1, EV.send + 6, 1);
+  if (a > 0) {
+    c.save(); c.globalAlpha = a; c.translate(1440, 270);
+    c.fillStyle = "rgba(14,16,24,.92)"; c.beginPath(); c.roundRect(0, 0, 300, 430, 30); c.fill();
+    c.fillStyle = "#e8e8f0"; c.font = '600 22px "Noto Serif SC", serif'; c.textAlign = "center"; c.fillText("♥", 150, 46);
+    const msg = "The tree outside is blooming.", n = Math.floor(msg.length * clamp((t - EV.typeStart) / (EV.typeEnd - EV.typeStart)));
+    const sent = t >= EV.send;
+    c.textAlign = "left"; c.font = '400 20px "Noto Serif SC", serif';
+    if (sent) { c.fillStyle = "#4a7ad8"; c.beginPath(); c.roundRect(40, 250, 240, 70, 18); c.fill(); c.fillStyle = "#fff"; c.fillText("The tree outside", 58, 280); c.fillText("is blooming.", 58, 306); c.fillStyle = "rgba(220,220,230,.6)"; c.font = '400 15px serif'; c.fillText("Delivered", 214, 342); }
+    else { c.fillStyle = "#2a2c36"; c.beginPath(); c.roundRect(20, 370, 260, 40, 14); c.fill(); c.fillStyle = "#e8e8f0"; c.fillText(msg.slice(0, n).slice(-24) + (Math.floor(t * 2) % 2 ? "|" : ""), 32, 397); }
+    c.restore();
+  }
+}
+// 8. 春天的早晨：窗开着，他擦干净她的椅子，摆上花和两只杯子，坐在旁边。她的光短暂地坐回那把椅子
+function sSpring(c, t) {
+  const wiping = EV.wipes.some(w => t > w - 0.1 && t < w + 0.9);
+  const clean = ss(EV.wipes[0], EV.wipes[EV.wipes.length - 1] + 1, t), cups = 1 + ss(EV.cups[1] - 0.6, EV.cups[1], t);
+  c.save(); camera(c, t, S.fin[0], S.outro[0], [1350, 600, 1.12], [1240, 620, 1.0]);
+  room(c, t, "spring", { cups, steam: 1, t, flowers: ss(EV.cups[0] - 1, EV.cups[0], t), herChairClean: clean, breeze: 1 });
+  if (t < EV.cups[0] - 1.5) oldMan(c, HER_CHAIR - 200, FLOOR, 1.15, { pose: "stand", t, hold: "cloth", arm: -1.2 + (wiping ? Math.sin(t * 9) * 0.25 : 0) });
+  else oldMan(c, HIS_CHAIR + 10, FLOOR, 1.15, { pose: "sit", t, arm: -0.4, smile: t > EV.ghost[0] });
+  her(c, HER_CHAIR, FLOOR - 40, 1.05, 0.75 * win(t, EV.ghost[0], EV.ghost[1], 2.5), "sit");
+  c.restore();
+}
+// 9. 尾声：镜头退到楼外，他那扇窗亮着暖光
+function sOutro(c, t) {
+  const p = prog("outro", t);
+  vgrad(c, 0, 0, W, H, [[0, "#3a4272"], [0.6, "#c88a7a"], [1, "#f0c0a0"]]);
+  c.save(); c.translate(W / 2, H * 0.55); c.scale(lerp(1.6, 1.0, ss(0, 1, p)), lerp(1.6, 1.0, ss(0, 1, p))); c.translate(-W / 2, -H * 0.55);
+  c.fillStyle = "#4a3a4a"; c.fillRect(520, 160, 880, 1000);
+  const r = rng(5);
+  for (let row = 0; row < 6; row++) for (let col = 0; col < 5; col++) {
+    const x = 570 + col * 170, y = 210 + row * 150, mine = row === 3 && col === 2;
+    c.fillStyle = mine ? "#ffd8a0" : r() < 0.45 ? "rgba(255,200,130,.7)" : "#2a2232"; c.fillRect(x, y, 110, 100);
+    if (mine) { c.globalCompositeOperation = "lighter"; glow(c, x + 55, y + 50, 200, "255,200,130", 0.45); c.globalCompositeOperation = "source-over"; c.fillStyle = "rgba(60,40,30,.6)"; c.fillRect(x + 30, y + 60, 16, 20); c.fillRect(x + 64, y + 60, 16, 20); }
+  }
+  c.restore();
+  titleCard(c, t, S.outro[0] + 6, TL.duration - 0.6, "A Little Room for You", "Story, lyrics & animation · Claude　　Song · 乙白 with Suno.cn");
+}
+
+function titleCard(c, t, a, b, title, sub) {
+  const al = win(t, a, b, 1.8);
+  if (al <= 0) return;
+  c.save(); c.globalAlpha = al; c.textAlign = "center"; c.textBaseline = "middle";
+  c.font = 'italic 400 92px "Noto Serif SC", serif'; c.letterSpacing = "4px";
+  c.fillStyle = "#fff8ee"; c.shadowColor = "rgba(0,0,0,.45)"; c.shadowBlur = 24;
+  c.fillText(title, W / 2, H * 0.4);
+  if (sub) { c.shadowBlur = 10; c.font = '400 26px "Noto Serif SC", serif'; c.letterSpacing = "3px"; c.fillStyle = "rgba(255,248,238,.9)"; c.fillText(sub, W / 2, H * 0.4 + 90); }
+  c.restore();
+}
+
+// ---------- 编排 ----------
+const SCENES = [
+  [sMorning, 0, S.pre1[0]], [sWindow, S.pre1[0], S.ch1[0]], [sMemory, S.ch1[0], S.v2[0]], [sStore, S.v2[0], S.pre2[0]],
+  [sWalk, S.pre2[0], S.ch2[0]], [sSeasons, S.ch2[0], S.bridge[0]], [sNight, S.bridge[0], S.fin[0]], [sSpring, S.fin[0], S.outro[0]], [sOutro, S.outro[0], TL.duration + 1],
+];
+const FADE = 1.4;
+const layers = [0, 1].map(() => { const o = document.createElement("canvas"); o.width = W; o.height = H; return o; });
+const LYRIC_BG = (() => { const g = ctx.createLinearGradient(0, H - 260, 0, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.5)"); return g; })();
+const VIG = (() => { const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.45)"); return g; })();
+const GRAIN = (() => { const o = document.createElement("canvas"); o.width = o.height = 512; const c = o.getContext("2d"), img = c.createImageData(512, 512), r = rng(707); for (let i = 0; i < img.data.length; i += 4) { const v = r() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; } c.putImageData(img, 0, 0); return o; })();
+
+function drawLyrics(t) {
+  ctx.fillStyle = LYRIC_BG; ctx.fillRect(0, H - 260, W, 260);
+  for (const [a, b, en, zh] of LYRICS) {
+    // 上一句在自己的结束时刻前淡出，下一句再淡入，两行不会叠在一起
+    if (t < a - 0.3 || t > b) continue;
+    ctx.save(); ctx.globalAlpha = Math.min(ss(a - 0.3, a + 0.1, t), 1 - ss(b - 0.3, b, t)); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 12; ctx.fillStyle = "#fffaf2";
+    ctx.font = 'italic 400 48px "Noto Serif SC", serif'; ctx.letterSpacing = "1px"; ctx.fillText(en, W / 2, H - 128);
+    ctx.font = '400 30px "Noto Serif SC", serif'; ctx.letterSpacing = "4px"; ctx.fillStyle = "rgba(255,246,232,.85)"; ctx.fillText(zh, W / 2, H - 72);
+    ctx.restore();
+  }
+}
+
+function renderAt(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.filter = "none";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  let li = 0;
+  for (const [fn, a, b] of SCENES) {
+    if (t < a - FADE || t > b + FADE) continue;
+    const al = Math.min(ss(a - FADE, a + FADE, t), 1 - ss(b - FADE, b + FADE, t));
+    if (al <= 0) continue;
+    const L = layers[li++ % 2], c = L.getContext("2d");
+    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over"; c.filter = "none"; c.clearRect(0, 0, W, H);
+    fn(c, t);
+    ctx.globalAlpha = a <= 0 ? 1 : al; ctx.drawImage(L, 0, 0); ctx.globalAlpha = 1;
+  }
+  // 暖色漏光 + 暗角 + 胶片颗粒
+  ctx.globalCompositeOperation = "lighter"; glow(ctx, W * (0.15 + 0.05 * Math.sin(t * 0.13)), H * 0.1, 700, "255,170,110", 0.06); ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = VIG; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = 0.06;
+  const f = Math.round(t * 24), ox = (f * 137) % 512, oy = (f * 251) % 512;
+  for (let x = -ox; x < W; x += 512) for (let y = -oy; y < H; y += 512) ctx.drawImage(GRAIN, x, y);
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  ctx.fillStyle = `rgba(0,0,0,${Math.max(1 - ss(0, 3, t), ss(TL.duration - 3, TL.duration, t))})`; ctx.fillRect(0, 0, W, H);
+  drawLyrics(t);
+}
+
+window.renderAt = renderAt;
+window.ready = document.fonts.load('italic 48px "Noto Serif SC"').then(() => document.fonts.load('30px "Noto Serif SC"')).then(() => { renderAt(0); return true; });
+</script>
+</body>
+</html>

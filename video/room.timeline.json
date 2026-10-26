@@ -1,0 +1,352 @@
+{
+ "duration": 192.76,
+ "sections": {
+  "intro": [
+   0,
+   12.92
+  ],
+  "v1": [
+   12.92,
+   27.88
+  ],
+  "pre1": [
+   27.88,
+   41.88
+  ],
+  "ch1": [
+   41.88,
+   70.98
+  ],
+  "v2": [
+   70.98,
+   84.14
+  ],
+  "pre2": [
+   84.14,
+   96.94
+  ],
+  "ch2": [
+   96.94,
+   125.46
+  ],
+  "bridge": [
+   125.46,
+   140.64
+  ],
+  "fin": [
+   140.64,
+   175.13
+  ],
+  "outro": [
+   175.13,
+   192.76
+  ]
+ },
+ "lyrics": [
+  [
+   13.72,
+   18.86,
+   "Your coat is still hanging by the door",
+   "你的外套还挂在门边"
+  ],
+  [
+   19.06,
+   21.82,
+   "I keep meaning to move it",
+   "我一直想把它收起来"
+  ],
+  [
+   22.02,
+   26.13,
+   "Your number's still there in my phone",
+   "你的号码还存在我手机里"
+  ],
+  [
+   26.33,
+   28.48,
+   "I know I'll never use it",
+   "我知道再也不会拨出去"
+  ],
+  [
+   28.68,
+   32.75,
+   "The world went on like nothing changed",
+   "世界照常运转，好像什么都没变"
+  ],
+  [
+   32.95,
+   36.34,
+   "The traffic, the weather, the news",
+   "车流、天气、新闻"
+  ],
+  [
+   36.54,
+   39.61,
+   "But somewhere in the middle of it all",
+   "可在这一切的中间"
+  ],
+  [
+   39.81,
+   42.48,
+   "There's a space the shape of you",
+   "空着一块你的形状"
+  ],
+  [
+   42.68,
+   46.55,
+   "So I keep a little room for you",
+   "所以我为你留着一小块地方"
+  ],
+  [
+   46.75,
+   50.14,
+   "Where the quiet doesn't hurt",
+   "在那里，安静也不再刺痛"
+  ],
+  [
+   50.34,
+   53.33,
+   "I keep a little room for you",
+   "我为你留着一小块地方"
+  ],
+  [
+   53.53,
+   56.84,
+   "In the corners of my words",
+   "在我话语的角落"
+  ],
+  [
+   57.04,
+   61.23,
+   "They say that time will clear it out",
+   "他们说时间会把它清空"
+  ],
+  [
+   61.43,
+   63.63,
+   "But I don't want it to",
+   "可我不愿意"
+  ],
+  [
+   63.83,
+   66.82,
+   "So I keep a little room",
+   "所以我留着这一小块地方"
+  ],
+  [
+   67.02,
+   71.58,
+   "A little room for you",
+   "一小块，留给你"
+  ],
+  [
+   71.78,
+   75.67,
+   "Somebody laughed the way you did",
+   "有人笑得和你一模一样"
+  ],
+  [
+   75.87,
+   79.26,
+   "In line at the grocery store",
+   "在超市排队的时候"
+  ],
+  [
+   79.46,
+   82.3,
+   "And for a second I turned around",
+   "那一秒，我回过头"
+  ],
+  [
+   82.5,
+   84.74,
+   "Like I'd find you there once more",
+   "好像还能再看见你"
+  ],
+  [
+   84.94,
+   88.52,
+   "The world went on like nothing changed",
+   "世界照常运转，好像什么都没变"
+  ],
+  [
+   88.72,
+   92.11,
+   "The traffic, the weather, the news",
+   "车流、天气、新闻"
+  ],
+  [
+   92.31,
+   95.3,
+   "But somewhere in the middle of it all",
+   "可在这一切的中间"
+  ],
+  [
+   95.5,
+   97.54,
+   "There's a space the shape of you",
+   "空着一块你的形状"
+  ],
+  [
+   97.74,
+   101.28,
+   "So I keep a little room for you",
+   "所以我为你留着一小块地方"
+  ],
+  [
+   101.48,
+   104.96,
+   "Where the quiet doesn't hurt",
+   "在那里，安静也不再刺痛"
+  ],
+  [
+   105.16,
+   108.23,
+   "I keep a little room for you",
+   "我为你留着一小块地方"
+  ],
+  [
+   108.43,
+   111.66,
+   "In the corners of my words",
+   "在我话语的角落"
+  ],
+  [
+   111.86,
+   116.13,
+   "They say that time will clear it out",
+   "他们说时间会把它清空"
+  ],
+  [
+   116.33,
+   118.44,
+   "But I don't want it to",
+   "可我不愿意"
+  ],
+  [
+   118.64,
+   121.63,
+   "So I keep a little room",
+   "所以我留着这一小块地方"
+  ],
+  [
+   121.83,
+   126.06,
+   "A little room for you",
+   "一小块，留给你"
+  ],
+  [
+   126.26,
+   130.01,
+   "You don't have to answer",
+   "你不必回答"
+  ],
+  [
+   130.21,
+   133.52,
+   "You don't have to stay",
+   "你不必留下"
+  ],
+  [
+   133.72,
+   136.31,
+   "I just needed you to know",
+   "我只是想让你知道"
+  ],
+  [
+   136.51,
+   141.24,
+   "You're not gone in every way",
+   "你并没有完全离开"
+  ],
+  [
+   141.44,
+   145.01,
+   "So I keep a little room for you",
+   "所以我为你留着一小块地方"
+  ],
+  [
+   145.21,
+   148.68,
+   "Where the quiet doesn't hurt",
+   "在那里，安静也不再刺痛"
+  ],
+  [
+   148.88,
+   151.87,
+   "I keep a little room for you",
+   "我为你留着一小块地方"
+  ],
+  [
+   152.07,
+   155.3,
+   "In the corners of my words",
+   "在我话语的角落"
+  ],
+  [
+   155.5,
+   159.77,
+   "Let time take everything it wants",
+   "时间想拿走什么，就拿走吧"
+  ],
+  [
+   159.97,
+   162.16,
+   "It can't take this from you",
+   "唯独这个，它拿不走"
+  ],
+  [
+   162.36,
+   168.86,
+   "'Cause I keep a little room",
+   "因为我留着这一小块地方"
+  ],
+  [
+   169.06,
+   175.73,
+   "A little room for you",
+   "一小块，留给你"
+  ],
+  [
+   175.93,
+   182.93,
+   "A little room for you",
+   "一小块，留给你"
+  ],
+  [
+   184.08,
+   189.56,
+   "A little room for you",
+   "一小块，留给你"
+  ]
+ ],
+ "events": {
+  "cars": [
+   29.48,
+   32.58,
+   35.68,
+   38.78
+  ],
+  "laugh": 72.38,
+  "turn": 79.66,
+  "step": 0.62,
+  "typeStart": 126.66,
+  "typeEnd": 129.86,
+  "send": 130.36,
+  "wipes": [
+   142.64,
+   143.54,
+   144.44,
+   145.34,
+   146.24
+  ],
+  "cups": [
+   150.14,
+   151.24
+  ],
+  "ghost": [
+   155.0,
+   164.47
+  ]
+ }
+}
