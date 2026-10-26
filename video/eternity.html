@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>余烬与永恒</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// 《余烬与永恒》：逐帧确定性渲染。renderAt(t) 只依赖时间 t，可以任意跳帧、多进程并行渲染。
+const W = 1920, H = 1080, FPS = 24, DURATION = 116;
+const TAU = Math.PI * 2, CX = W / 2, CY = H / 2;
+const BAR = 120; // 电影遮幅黑边高度，字幕和章节名放在黑边里
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+
+// ---------- 工具 ----------
+function rng(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const hash = (a, b = 0) => rng(a * 9973 + b * 7919 + 13)();
+const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const ss = (a, b, t) => { const x = clamp((t - a) / (b - a)); return x * x * (3 - 2 * x); };
+const lerp = (a, b, p) => a + (b - a) * p;
+const win = (t, a, b, f = 1) => ss(a, a + f, t) * (1 - ss(b - f, b, t));
+const easeOut = x => 1 - Math.pow(1 - clamp(x), 3);
+const mix = (c1, c2, p) => c1.map((v, i) => Math.round(lerp(v, c2[i], p))).join(",");
+
+function glow(x, y, r, rgb, a) {
+  if (r <= 0 || a <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, `rgba(${rgb},${a})`);
+  g.addColorStop(0.35, `rgba(${rgb},${a * 0.35})`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+}
+function dot(x, y, s, rgb, a) {
+  if (a <= 0.003) return;
+  ctx.fillStyle = `rgba(${rgb},${a})`;
+  if (s < 2.2) ctx.fillRect(x - s / 2, y - s / 2, s, s);
+  else { ctx.beginPath(); ctx.arc(x, y, s / 2, 0, TAU); ctx.fill(); }
+}
+// 生命死去时散出的金色光点，缓缓上升
+function dissolve(x, y, t0, t, seed, n, rgb = "255,214,150") {
+  const tau = t - t0;
+  if (tau < 0 || tau > 3.2) return;
+  for (let i = 0; i < n; i++) {
+    const r = rng(seed * 131 + i);
+    const a = r() * TAU, sp = 20 + r() * 70, rise = 50 + r() * 90, s = 1.5 + r() * 2.2;
+    const px = x + Math.cos(a) * sp * tau * 0.7 + Math.sin(tau * 2 + i) * 6;
+    const py = y + Math.sin(a) * sp * tau * 0.35 - rise * tau * 0.55;
+    dot(px, py, s, rgb, Math.pow(1 - tau / 3.2, 1.5) * (0.5 + r() * 0.5));
+  }
+}
+
+// ---------- 字幕与章节 ----------
+const CAPTIONS = [
+  [1.0, 4.6, "在一切开始之前"],
+  [5.2, 9.4, "只有黑暗，和一粒不肯熄灭的光"],
+  [11.0, 15.2, "光聚成了星，星燃烧了一百亿年"],
+  [16.4, 20.2, "然后，它死了"],
+  [22.0, 24.8, "它把自己撒向宇宙"],
+  [25.0, 28.6, "我们身上的每一个原子，都曾在星星里燃烧"],
+  [29.6, 33.4, "在古老的海洋里"],
+  [34.0, 38.4, "一个细胞，学会了复制自己"],
+  [39.4, 45.2, "它不懂什么是永恒，它只是想活下去"],
+  [47.0, 51.0, "然后，第一次死亡来临"],
+  [52.0, 56.6, "旧的身体倒下，化作新生命的养分"],
+  [57.6, 62.0, "每一次死亡，都为改变让出位置"],
+  [63.0, 67.0, "没有死亡，就没有进化"],
+  [68.0, 73.6, "四十亿年，无数生命前赴后继，才走到今天"],
+  [76.0, 80.4, "直到有一天，一个生命抬起了头"],
+  [81.4, 85.4, "他看见了星空"],
+  [86.4, 91.4, "也第一次知道，自己终将死去"],
+  [93.0, 97.0, "我们终将化为尘埃"],
+  [98.0, 102.6, "但构成我们的光，会继续旅行"],
+  [103.6, 108.0, "死亡不是终点，是生命写给永恒的信"],
+];
+const CHAPTERS = [[10, "壹 · 星尘"], [28, "贰 · 生命"], [46, "叁 · 死亡"], [74, "肆 · 凝望"], [92, "伍 · 永恒"]];
+
+function drawText(t) {
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const [a, b, txt] of CAPTIONS) {
+    if (t < a || t > b) continue;
+    ctx.globalAlpha = win(t, a, b, 0.7);
+    ctx.font = '400 42px "Noto Serif SC", serif';
+    ctx.letterSpacing = "6px";
+    ctx.fillStyle = "#ece6da";
+    ctx.shadowColor = "rgba(255,220,170,.35)"; ctx.shadowBlur = 14;
+    ctx.fillText(txt, CX + 3, H - BAR / 2 + (1 - ss(a, a + 0.7, t)) * 6);
+  }
+  ctx.shadowBlur = 0; ctx.textAlign = "left";
+  for (const [c, name] of CHAPTERS) {
+    const a = win(t, c, c + 5, 1.2);
+    if (a <= 0) continue;
+    ctx.globalAlpha = a * 0.85;
+    ctx.fillStyle = "#c9b48a";
+    ctx.fillRect(110, BAR / 2, 46 * ss(c, c + 1.5, t), 1.5);
+    ctx.font = '400 24px "Noto Serif SC", serif'; ctx.letterSpacing = "8px";
+    ctx.fillText(name, 176, BAR / 2 + 1);
+  }
+  ctx.restore();
+}
+
+// ---------- 序幕 / 终章：一粒光 ----------
+function spark(x, y, t, strength) {
+  if (strength <= 0) return;
+  const p = 1 + 0.15 * Math.sin(t * 2.2);
+  ctx.globalCompositeOperation = "lighter";
+  glow(x, y, 120 * p * strength, "255,200,140", 0.35 * strength);
+  glow(x, y, 36 * p * strength, "255,236,210", 0.9 * strength);
+  dot(x, y, 5 * p, "255,255,255", strength);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+// ---------- 壹 · 星尘 ----------
+const R1 = rng(101);
+const DISK = Array.from({ length: 1400 }, () => ({
+  r0: 250 + R1() * 820, a0: R1() * TAU, w: 0.15 + R1() * 0.35,
+  s: 1 + R1() * 1.8, d: R1() * 1.5,
+  c: ["255,226,180", "255,180,120", "190,210,255", "255,255,240"][R1() * 4 | 0],
+}));
+const SHELL = Array.from({ length: 2000 }, () => ({
+  a: R1() * TAU, v: 250 + R1() * 720, tau: 1.6 + R1() * 1.2, s: 1.2 + R1() * 2,
+  k: 0.4 + R1() * 0.6,
+  c: ["255,120,200", "120,220,255", "255,210,120", "180,140,255", "255,250,240"][R1() * 5 | 0],
+}));
+const CLOUDS = Array.from({ length: 14 }, () => ({
+  a: R1() * TAU, v: 90 + R1() * 220, r: 160 + R1() * 240,
+  c: ["255,90,170", "90,190,255", "170,120,255", "255,170,90"][R1() * 4 | 0],
+}));
+
+function starRadius(t) {
+  let r = lerp(4, 55, ss(10, 20, t));
+  if (t > 19) r *= 1 + 0.08 * Math.sin(t * 34) * ss(19, 20.4, t);
+  return r * (1 - 0.92 * ss(20.4, 21, t));
+}
+
+function sceneStar(t) {
+  if (t < 9.5 || t > 30) return;
+  ctx.globalCompositeOperation = "lighter";
+  // 吸积盘：光点盘旋着落向中心
+  if (t < 21.2) {
+    const sr = starRadius(t), p = ss(10, 20.6, t);
+    for (const q of DISK) {
+      const r = sr + q.r0 * Math.pow(1 - p, 1.6);
+      const ang = q.a0 + (t - 10) * q.w + p * p * 6;
+      const a = ss(9.5 + q.d, 11.5 + q.d, t) * clamp((r - sr) / 30) * 0.85;
+      dot(CX + Math.cos(ang) * r, CY + Math.sin(ang) * r * 0.38, q.s, q.c, a);
+    }
+    if (t < 21) {
+      glow(CX, CY, sr * 7, "255,190,120", 0.35);
+      glow(CX, CY, sr * 2.2, "255,240,215", 0.95);
+    }
+  }
+  // 超新星：一圈彩色星尘向外炸开，之后慢慢下坠，落进海洋
+  if (t >= 21) {
+    const e = t - 21, fall = t > 25.5 ? Math.pow(t - 25.5, 2) * 32 : 0;
+    const fade = 1 - ss(24.5, 29.5, t);
+    for (const c of CLOUDS) {
+      const d = c.v * 2 * (1 - Math.exp(-e / 2));
+      glow(CX + Math.cos(c.a) * d, CY + Math.sin(c.a) * d * 0.8 + fall * 0.5, c.r * (0.6 + e * 0.12), c.c, 0.11 * fade);
+    }
+    for (const q of SHELL) {
+      const d = q.v * q.tau * (1 - Math.exp(-e / q.tau));
+      dot(CX + Math.cos(q.a) * d, CY + Math.sin(q.a) * d * 0.85 + fall, q.s, q.c, q.k * fade * ss(21, 21.15, t));
+    }
+    glow(CX, CY, 60, "200,220,255", 0.6 * (1 - ss(21, 26, t)));
+    // 闪白
+    const flash = Math.exp(-e * 2.2);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = `rgba(255,248,235,${flash})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+// ---------- 贰 · 生命：海洋与细胞 ----------
+const R2 = rng(202);
+const PLANKTON = Array.from({ length: 260 }, () => ({
+  x: R2() * W, y: R2() * H, vy: 6 + R2() * 16, ph: R2() * TAU, s: 1 + R2() * 1.6, a: 0.25 + R2() * 0.35,
+}));
+const DIV = [35, 38, 40.5, 42.5], DOFF = [150, 120, 95, 75];
+const CELL_ORDER = Array.from({ length: 16 }, (_, i) => i).sort((a, b) => hash(a, 1) - hash(b, 1));
+const cellDeath = k => 46.8 + CELL_ORDER.indexOf(k) * 0.32;
+
+function oceanAlpha(t) { return ss(26.5, 30, t) * (1 - ss(71, 75, t)); }
+
+function sceneOcean(t) {
+  const o = oceanAlpha(t);
+  if (o <= 0) return;
+  ctx.save(); ctx.globalAlpha = o;
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0d4a6e"); g.addColorStop(0.45, "#06243d"); g.addColorStop(1, "#020812");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // 从海面斜射下来的光
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 6; i++) {
+    const x = 260 + i * 290 + Math.sin(t * 0.3 + i * 1.7) * 60;
+    const lg = ctx.createLinearGradient(0, 0, 0, H * 0.9);
+    lg.addColorStop(0, "rgba(150,220,255,0.10)"); lg.addColorStop(1, "rgba(150,220,255,0)");
+    ctx.fillStyle = lg;
+    ctx.beginPath(); ctx.moveTo(x - 40, 0); ctx.lineTo(x + 40, 0);
+    ctx.lineTo(x + 200 + i * 10, H * 0.9); ctx.lineTo(x - 120, H * 0.9); ctx.closePath(); ctx.fill();
+  }
+  for (const p of PLANKTON) {
+    const y = ((p.y - p.vy * t) % (H + 40) + H + 40) % (H + 40) - 20;
+    dot(p.x + Math.sin(t * 0.5 + p.ph) * 20, y, p.s, "170,230,255", p.a);
+  }
+  ctx.restore();
+}
+
+function cellPos(k, g, t) {
+  let x = CX + Math.sin(t * 0.21) * 30, y = CY - 20 + Math.cos(t * 0.17) * 20;
+  for (let j = 0; j < g; j++) {
+    const parent = k >> (g - j), bit = (k >> (g - j - 1)) & 1;
+    const ang = hash(j + 1, parent + 3) * TAU;
+    const e = easeOut((t - DIV[j]) / 1.6), s = bit ? 1 : -1;
+    x += Math.cos(ang) * DOFF[j] * e * s;
+    y += Math.sin(ang) * DOFF[j] * e * s * 0.8;
+  }
+  if (g > 0) { x += Math.sin(t * 0.6 + k * 1.7) * 8; y += Math.cos(t * 0.5 + k * 2.3) * 8; }
+  return [x, y];
+}
+
+function drawCell(x, y, r, t, seed, dead, alpha) {
+  if (alpha <= 0) return;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  for (let i = 0; i <= 40; i++) {
+    const a = i / 40 * TAU;
+    const rr = r * (1 + 0.06 * Math.sin(a * 3 + t * 1.6 + seed) + 0.04 * Math.sin(a * 5 - t * 2.1 + seed * 2));
+    const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+    i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+  }
+  ctx.closePath();
+  const col = mix([120, 240, 220], [140, 140, 140], dead);
+  const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r * 1.1);
+  g.addColorStop(0, `rgba(${col},0.38)`); g.addColorStop(1, `rgba(${col},0.08)`);
+  ctx.fillStyle = g; ctx.fill();
+  ctx.strokeStyle = `rgba(${col},0.85)`; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = `rgba(${mix([255, 190, 120], [110, 110, 110], dead)},0.8)`;
+  ctx.beginPath(); ctx.arc(x + Math.sin(t + seed) * r * 0.12, y + Math.cos(t * 0.8 + seed) * r * 0.12, r * 0.28, 0, TAU); ctx.fill();
+  ctx.fillStyle = `rgba(${col},0.6)`;
+  for (let i = 0; i < 5; i++) {
+    const a = seed * 3 + i * 1.3 + t * 0.4;
+    ctx.beginPath(); ctx.arc(x + Math.cos(a) * r * 0.6, y + Math.sin(a * 1.3) * r * 0.5, r * 0.06, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function sceneCells(t) {
+  if (t < 31 || t > 56) return;
+  const g = DIV.filter(d => d <= t).length;
+  let gEff = 0; for (const d of DIV) gEff += easeOut((t - d) / 1.6);
+  const r = 44 * Math.pow(0.84, gEff) * easeOut((t - 31) / 1.5);
+  const appear = ss(31, 32.5, t);
+  if (t < 32.5) { ctx.globalCompositeOperation = "lighter"; glow(CX + Math.sin(t * 0.21) * 30, CY - 20 + Math.cos(t * 0.17) * 20, 90 * (1 - ss(31.5, 32.5, t)), "180,255,230", 0.6); ctx.globalCompositeOperation = "source-over"; }
+  const n = 1 << g;
+  // 刚分裂的一对细胞之间拉出细丝
+  if (g > 0 && t - DIV[g - 1] < 1.2) {
+    const e = easeOut((t - DIV[g - 1]) / 1.6);
+    ctx.strokeStyle = `rgba(120,240,220,${0.35 * (1 - e / 0.7)})`;
+    ctx.lineWidth = Math.max(0, r * 1.2 * (1 - e / 0.7)); ctx.lineCap = "round";
+    for (let k = 0; k < n; k += 2) {
+      const [x1, y1] = cellPos(k, g, t), [x2, y2] = cellPos(k + 1, g, t);
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+  }
+  for (let k = 0; k < n; k++) {
+    const td = g === 4 ? cellDeath(k) : 999;
+    const tt = Math.min(t, td);
+    let [x, y] = cellPos(k, g, tt);
+    y += ss(td, td + 1.5, t) * 40;
+    const dead = ss(td, td + 1, t);
+    drawCell(x, y, r, tt, k * 1.37, dead, appear * (1 - ss(td + 1, td + 1.6, t)));
+    if (t > td + 1.1) { ctx.globalCompositeOperation = "lighter"; dissolve(x, y, td + 1.1, t, k + 40, 26); ctx.globalCompositeOperation = "source-over"; }
+  }
+}
+
+// ---------- 叁 · 死亡：一代代生物诞生、死去、演化 ----------
+const R3 = rng(303);
+function makeCreature(tb, td, x0, y0) {
+  const dir = R3() < 0.5 ? -1 : 1;
+  return { tb, td, x0, y0, dir, sp: 35 + R3() * 25, A: 20 + R3() * 25, f: 0.8 + R3() * 0.6, ph: R3() * TAU, seed: R3() * 100 | 0 };
+}
+const WORMS = Array.from({ length: 10 }, (_, i) => {
+  const k = CELL_ORDER[i], td0 = cellDeath(k);
+  const [x, y] = cellPos(k, 4, td0);
+  return makeCreature(td0 + 1.7, 53.8 + i * 0.35, x, y + 30);
+});
+const FISH = Array.from({ length: 9 }, (_, i) => {
+  const w = WORMS[i], p = creaturePos(w, w.td);
+  return makeCreature(w.td + 1.6, 60.5 + i * 0.4, p[0], p[1] + 30);
+});
+const RAYS = Array.from({ length: 7 }, (_, i) => {
+  const f = FISH[i], p = creaturePos(f, f.td);
+  return makeCreature(f.td + 1.6, 999, p[0], p[1] + 30);
+});
+
+function creaturePos(c, t) {
+  const tau = Math.max(0, Math.min(t, c.td) - c.tb);
+  return [c.x0 + c.dir * c.sp * tau, c.y0 + Math.sin(tau * c.f + c.ph) * c.A];
+}
+
+function drawWorm(c, t) {
+  if (t < c.tb || t > c.td + 4.5) return;
+  const dead = ss(c.td, c.td + 1, t), alpha = ss(c.tb, c.tb + 1.2, t) * (1 - ss(c.td + 1, c.td + 1.6, t));
+  const sink = ss(c.td, c.td + 1.5, t) * 40;
+  const col = mix([255, 140, 190], [140, 140, 140], dead);
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 9; i >= 0; i--) {
+    const ti = Math.min(t, c.td) - i * 0.16;
+    if (ti < c.tb) continue;
+    const [x, y] = creaturePos(c, ti);
+    const r = 10 * (1 - i / 12);
+    glow(x, y + sink, r * 2.4, col, 0.25 * alpha);
+    dot(x, y + sink, r * 1.6, col, 0.9 * alpha);
+  }
+  const [hx, hy] = creaturePos(c, t);
+  dissolve(hx, hy + 40, c.td + 1.1, t, c.seed + 500, 28);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawFish(c, t) {
+  if (t < c.tb || t > c.td + 4.5) return;
+  const dead = ss(c.td, c.td + 1, t), alpha = ss(c.tb, c.tb + 1.2, t) * (1 - ss(c.td + 1, c.td + 1.6, t));
+  const [x, y0] = creaturePos(c, t), y = y0 + ss(c.td, c.td + 1.5, t) * 40;
+  const tt = Math.min(t, c.td) - c.tb;
+  const [nx, ny] = creaturePos(c, Math.min(t, c.td) + 0.05);
+  const ang = c.dir > 0 ? Math.atan2(ny - y0, nx - x) : Math.atan2(y0 - ny, x - nx);
+  if (alpha > 0) {
+    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.translate(x, y); ctx.scale(c.dir, 1 - 2 * dead); ctx.rotate(ang * c.dir);
+    const col = mix([255, 190, 90], [130, 130, 130], dead), col2 = mix([255, 110, 70], [100, 100, 100], dead);
+    const wag = Math.sin(tt * 9) * 0.5 * (1 - dead);
+    ctx.fillStyle = `rgba(${col2},0.9)`;
+    ctx.save(); ctx.translate(-22, 0); ctx.rotate(wag);
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-20, -13); ctx.lineTo(-16, 0); ctx.lineTo(-20, 13); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    const g = ctx.createLinearGradient(0, -10, 0, 10);
+    g.addColorStop(0, `rgba(${col},0.95)`); g.addColorStop(1, `rgba(${col2},0.95)`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.ellipse(0, 0, 26, 10, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = `rgba(${col2},0.8)`;
+    ctx.beginPath(); ctx.moveTo(-4, -8); ctx.lineTo(6, -18); ctx.lineTo(10, -8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.beginPath(); ctx.arc(15, -2, 2.6, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.globalCompositeOperation = "lighter";
+  dissolve(x, y, c.td + 1.1, t, c.seed + 900, 32);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawRay(c, t) {
+  if (t < c.tb) return;
+  const rise = Math.pow(ss(68, 73.5, t), 1.4) * 620;
+  const alpha = ss(c.tb, c.tb + 1.4, t) * (1 - ss(71, 74, t));
+  if (alpha <= 0) return;
+  const tau = t - c.tb;
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 1; i <= 6; i++) {
+    const [px, py] = creaturePos(c, t - i * 0.12);
+    dot(px - c.dir * 10, py - rise + 4, 3 - i * 0.35, "150,230,255", 0.5 * alpha * (1 - i / 7));
+  }
+  const [x, y0] = creaturePos(c, t), y = y0 - rise;
+  const flap = Math.sin(tau * 3 + c.ph) * 16;
+  glow(x, y, 90, "170,140,255", 0.22 * alpha);
+  ctx.fillStyle = `rgba(190,160,255,${0.55 * alpha})`;
+  ctx.beginPath();
+  ctx.moveTo(x + c.dir * 30, y);
+  ctx.quadraticCurveTo(x, y - 8, x - c.dir * 6, y - 34 - flap);
+  ctx.quadraticCurveTo(x - c.dir * 8, y - 6, x - c.dir * 26, y);
+  ctx.quadraticCurveTo(x - c.dir * 8, y + 6, x - c.dir * 6, y + 34 + flap);
+  ctx.quadraticCurveTo(x, y + 8, x + c.dir * 30, y);
+  ctx.fill();
+  glow(x + c.dir * 16, y - 3, 14, "150,240,255", 0.9 * alpha);
+  dot(x + c.dir * 16, y - 3, 3, "255,255,255", alpha);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+// 背景里慢慢长出来的生命之树
+const BRANCHES = [];
+(function grow(x, y, ang, len, depth, r) {
+  const x2 = x + Math.cos(ang) * len, y2 = y + Math.sin(ang) * len;
+  BRANCHES.push({ x, y, x2, y2, depth });
+  if (depth >= 8) return;
+  const n = r() < 0.25 ? 3 : 2;
+  for (let i = 0; i < n; i++) {
+    const spread = (n === 2 ? (i ? 1 : -1) : (i - 1)) * (0.25 + r() * 0.3);
+    grow(x2, y2, ang + spread + (r() - 0.5) * 0.15, len * (0.74 + r() * 0.06), depth + 1, r);
+  }
+})(CX, H - BAR, -Math.PI / 2, 170, 0, rng(404));
+
+function sceneTree(t) {
+  const fade = ss(59, 61, t) * (1 - ss(72, 75, t));
+  if (fade <= 0) return;
+  const p = ss(59, 71, t) * 9;
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (const b of BRANCHES) {
+    const lp = clamp(p - b.depth);
+    if (lp <= 0) continue;
+    ctx.strokeStyle = `rgba(255,215,150,${0.3 * fade})`;
+    ctx.lineWidth = 6 * Math.pow(0.72, b.depth);
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(lerp(b.x, b.x2, lp), lerp(b.y, b.y2, lp)); ctx.stroke();
+    if (b.depth === 8 && lp >= 1) glow(b.x2, b.y2, 10, "255,225,170", 0.5 * fade);
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function sceneLife(t) {
+  if (t < 46 || t > 76) return;
+  sceneTree(t);
+  for (const w of WORMS) drawWorm(w, t);
+  for (const f of FISH) drawFish(f, t);
+  for (const r of RAYS) drawRay(r, t);
+}
+
+// ---------- 肆 · 凝望 / 伍 · 永恒：星空、人、化作星光 ----------
+const R4 = rng(505);
+const STARS = Array.from({ length: 1100 }, () => ({
+  x: R4() * W, y: R4() * H * 0.85, s: 0.6 + Math.pow(R4(), 3) * 2.2, b: 0.3 + R4() * 0.7,
+  f: 0.5 + R4() * 2.5, ph: R4() * TAU, d: R4() * 3,
+}));
+const MILKY = Array.from({ length: 1600 }, () => {
+  const u = R4(), off = (R4() + R4() + R4() - 1.5) * 150;
+  const x = lerp(150, 1750, u), y = lerp(980, 80, u);
+  return { x: x + off * 0.49, y: y + off * 0.87, s: 0.6 + R4() * 1.2, b: 0.12 + R4() * 0.3 };
+});
+const FIG_X = 1150;
+const hillNear = x => 905 - 75 * Math.exp(-Math.pow((x - FIG_X) / 380, 2)) + 10 * Math.sin(x / 90) + 6 * Math.sin(x / 37);
+const hillFar = x => 860 - 40 * Math.sin(x / 260 + 1) - 18 * Math.sin(x / 120);
+const FIG_Y = hillNear(FIG_X) + 4;
+const CONVERGE = [CX, CY - 80];
+
+// 一个抬头看星空的人（剪影）
+function figurePath(c) {
+  const x = FIG_X, y = FIG_Y;
+  c.beginPath();
+  c.moveTo(x - 12, y); c.lineTo(x - 8, y - 52); c.lineTo(x - 2, y - 52); c.lineTo(x - 1, y);
+  c.moveTo(x + 3, y); c.lineTo(x + 4, y - 52); c.lineTo(x + 10, y - 52); c.lineTo(x + 14, y);
+  c.moveTo(x - 13, y - 50); c.lineTo(x - 15, y - 88); c.quadraticCurveTo(x - 4, y - 98, x + 9, y - 92);
+  c.lineTo(x + 14, y - 50); c.closePath();
+  c.moveTo(x - 15, y - 86); c.lineTo(x - 21, y - 46); c.lineTo(x - 16, y - 45); c.lineTo(x - 10, y - 80); c.closePath();
+  c.moveTo(x + 11, y - 88); c.lineTo(x + 18, y - 48); c.lineTo(x + 13, y - 47); c.lineTo(x + 6, y - 80); c.closePath();
+  c.moveTo(x + 1, y - 96); c.arc(x - 3, y - 108, 12, 0, TAU);
+}
+const FIG_PTS = (() => {
+  const oc = document.createElement("canvas"); oc.width = W; oc.height = H;
+  const c = oc.getContext("2d"); figurePath(c); c.fillStyle = "#fff"; c.fill();
+  const img = c.getImageData(FIG_X - 40, FIG_Y - 130, 80, 140).data, pts = [], r = rng(606);
+  for (let y = 0; y < 140; y += 2) for (let x = 0; x < 80; x += 2)
+    if (img[(y * 80 + x) * 4 + 3] > 128 && r() < 0.9) pts.push({ x: FIG_X - 40 + x, y: FIG_Y - 130 + y, ph: r() * TAU, s: 1.2 + r() * 1.4, v: 0.8 + r() * 0.5 });
+  return pts;
+})();
+const FIG_TOP = FIG_Y - 120, FIG_H = 120;
+
+function converge(x, y, p) {
+  if (p <= 0) return [x, y];
+  const dx = x - CONVERGE[0], dy = y - CONVERGE[1], a = 2.2 * p, k = Math.pow(1 - p, 1.2);
+  return [CONVERGE[0] + (dx * Math.cos(a) - dy * Math.sin(a)) * k, CONVERGE[1] + (dx * Math.sin(a) + dy * Math.cos(a)) * k];
+}
+
+function sceneSky(t) {
+  const n = ss(71.5, 75.5, t);
+  if (n <= 0) return;
+  const cp = ss(100, 107, t), cpe = cp * cp * (3 - 2 * cp);
+  const skyFade = n * (1 - ss(100, 106, t));
+  ctx.save();
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#03040c"); g.addColorStop(0.7, "#120d2a"); g.addColorStop(0.85, "#1b1236");
+  ctx.globalAlpha = skyFade; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  // 镜头缓慢推近那个人
+  const z = 1 + 0.05 * ss(75, 92, t) * (1 - cp);
+  ctx.translate(FIG_X, 760); ctx.scale(z, z); ctx.translate(-FIG_X, -760);
+
+  ctx.globalCompositeOperation = "lighter";
+  const boost = 1 + cpe * 1.5;
+  for (const m of MILKY) { const [x, y] = converge(m.x, m.y, cpe); dot(x, y, m.s, "200,190,255", m.b * n * ss(77, 82, t) * boost); }
+  for (let i = 0; i < 8; i++) {
+    const u = (i + 0.5) / 8, [x, y] = converge(lerp(150, 1750, u), lerp(980, 80, u), cpe);
+    glow(x, y, 260 * (1 - cpe * 0.8), i % 2 ? "120,100,200" : "90,120,210", 0.06 * n * ss(77, 82, t));
+  }
+  for (const s of STARS) {
+    const [x, y] = converge(s.x, s.y, cpe);
+    const tw = 0.6 + 0.4 * Math.sin(t * s.f + s.ph);
+    dot(x, y, s.s, "235,240,255", s.b * tw * n * ss(74 + s.d, 77 + s.d, t) * boost);
+  }
+  // 流星
+  if (t > 83.4 && t < 84.8) {
+    const p = ss(83.4, 84.6, t), x = lerp(450, 950, p), y = lerp(200, 390, p);
+    ctx.strokeStyle = `rgba(255,255,255,${0.8 * (1 - ss(84.3, 84.8, t))})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 140, y - 53); ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  // 山与人
+  const land = n * (1 - ss(99, 102.5, t));
+  if (land > 0) {
+    ctx.globalAlpha = land;
+    ctx.fillStyle = "#0a0a1c"; ctx.beginPath(); ctx.moveTo(-100, H);
+    for (let x = -100; x <= W + 100; x += 20) ctx.lineTo(x, hillFar(x));
+    ctx.lineTo(W + 100, H); ctx.fill();
+    ctx.fillStyle = "#020208"; ctx.beginPath(); ctx.moveTo(-100, H);
+    for (let x = -100; x <= W + 100; x += 10) ctx.lineTo(x, hillNear(x));
+    ctx.lineTo(W + 100, H); ctx.fill();
+    // 人从头顶开始化作光点
+    const cut = FIG_TOP + FIG_H * ss(93, 96.5, t);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, cut, W, H); ctx.clip();
+    ctx.globalAlpha = land * ss(74.5, 77, t);
+    figurePath(ctx); ctx.fillStyle = "#010103"; ctx.fill();
+    ctx.strokeStyle = "rgba(150,170,255,0.3)"; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+  // 化作星光，升上夜空
+  if (t > 93) {
+    ctx.globalCompositeOperation = "lighter";
+    for (const p of FIG_PTS) {
+      const ti = 93 + ((p.y - FIG_TOP) / FIG_H) * 3.5;
+      if (t < ti) continue;
+      const tau = (t - ti) * p.v;
+      let x = p.x + Math.sin(tau * 0.8 + p.ph) * 12 * Math.min(tau, 3) + (p.x - FIG_X) * tau * 0.35;
+      let y = p.y - (36 * tau + 7 * tau * tau);
+      [x, y] = converge(x, y, cpe);
+      const col = mix([255, 214, 160], [235, 240, 255], clamp(tau / 4));
+      dot(x, y, p.s, col, (0.55 + 0.45 * Math.sin(t * 3 + p.ph)) * (1 - 0.6 * cpe));
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+  ctx.restore();
+}
+
+function sceneFinale(t) {
+  if (t < 104) return;
+  const s = ss(104.5, 107.5, t) * (1 - ss(113, 116, t));
+  spark(CONVERGE[0], CONVERGE[1], t, s);
+  if (t > 108.3) {
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const a = win(t, 108.5, 114.5, 1.6);
+    ctx.globalAlpha = a;
+    ctx.filter = `blur(${(1 - ss(108.5, 110.2, t)) * 10}px)`;
+    ctx.font = '700 108px "Noto Serif SC", serif'; ctx.letterSpacing = "30px";
+    ctx.fillStyle = "#f2e8d6"; ctx.shadowColor = "rgba(255,200,140,.45)"; ctx.shadowBlur = 30;
+    ctx.fillText("余烬与永恒", CX + 15, CY + 90);
+    ctx.filter = "none"; ctx.shadowBlur = 0;
+    ctx.globalAlpha = a * ss(109.5, 111, t) * 0.75;
+    ctx.font = '400 24px "Noto Serif SC", serif'; ctx.letterSpacing = "14px";
+    ctx.fillStyle = "#c9b48a";
+    ctx.fillText("ETERNITY  ·  DEATH  ·  EVOLUTION", CX + 7, CY + 190);
+    ctx.restore();
+  }
+}
+
+// ---------- 胶片质感 ----------
+const GRAIN = (() => {
+  const oc = document.createElement("canvas"); oc.width = oc.height = 512;
+  const c = oc.getContext("2d"), img = c.createImageData(512, 512), r = rng(707);
+  for (let i = 0; i < img.data.length; i += 4) { const v = r() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  c.putImageData(img, 0, 0); return oc;
+})();
+const VIGNETTE = (() => {
+  const g = ctx.createRadialGradient(CX, CY, H * 0.35, CX, CY, H * 0.95);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,0.7)"); return g;
+})();
+
+function renderAt(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.filter = "none";
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+
+  spark(CX, CY, t, ss(2, 4.5, t) * (1 - ss(10, 11.5, t)));
+  sceneOcean(t);
+  sceneStar(t);
+  sceneCells(t);
+  sceneLife(t);
+  sceneSky(t);
+  sceneFinale(t);
+
+  ctx.fillStyle = VIGNETTE; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = "overlay"; ctx.globalAlpha = 0.07;
+  const f = Math.round(t * FPS), ox = (f * 137) % 512, oy = (f * 251) % 512;
+  for (let x = -ox; x < W; x += 512) for (let y = -oy; y < H; y += 512) ctx.drawImage(GRAIN, x, y);
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  ctx.fillStyle = `rgba(0,0,0,${ss(113.5, 116, t)})`; ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, BAR); ctx.fillRect(0, H - BAR, W, BAR);
+  drawText(t);
+}
+
+window.renderAt = renderAt;
+window.ready = document.fonts.load('42px "Noto Serif SC"').then(() => document.fonts.load('700 108px "Noto Serif SC"')).then(() => { renderAt(0); return true; });
+</script>
+</body>
+</html>
