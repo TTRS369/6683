@@ -190,13 +190,13 @@
 
   let bullets = [], ebullets = [], enemies = [], pickups = [], particles = [], turrets = [];
   let score = 0, killed = 0, state = "menu", shakeT = 0, flashT = 0;
-  const boss = { active:false, x:LEVEL_LEN-220, y:GROUND_Y-180, w:150, h:180, hp:120, maxhp:120, t:0, part:0, dead:false, intro:0 };
+  const boss = { active:false, x:LEVEL_LEN-220, y:GROUND_Y-180, w:150, h:180, hp:90, maxhp:90, t:0, part:0, dead:false, intro:0 };
 
   function reset() {
     camX = 0; bullets=[]; ebullets=[]; particles=[]; pickups=[];
-    Object.assign(player, {x:80,y:GROUND_Y-46,vx:0,vy:0,onFloor:false,face:1,cool:0,weapon:0,wtimer:0,lives:3,inv:120,dead:false,respawn:0});
+    Object.assign(player, {x:80,y:GROUND_Y-46,vx:0,vy:0,onFloor:false,face:1,cool:0,weapon:0,wtimer:0,lives:5,inv:120,dead:false,respawn:0,anim:0});
     score=0; killed=0; shakeT=0; flashT=0;
-    Object.assign(boss,{active:false,x:LEVEL_LEN-220,y:GROUND_Y-180,hp:120,t:0,part:0,dead:false,intro:0});
+    Object.assign(boss,{active:false,x:LEVEL_LEN-220,y:GROUND_Y-180,hp:90,t:0,part:0,dead:false,intro:0});
     buildEnemies();
   }
 
@@ -279,13 +279,14 @@
       if (player.inv>0) player.inv--;
       if (player.cool>0) player.cool--;
       if (keys.fire) tryFire();
+      if (player.onFloor && player.vx!==0) player.anim++; else if (player.onFloor) player.anim=0;
       // 武器计时
       if (player.weapon>0) { player.wtimer--; if (player.wtimer<=0) player.weapon=0; }
     } else {
       player.respawn--;
       if (player.respawn<=0) {
         if (player.lives<=0) { endGame(false); return; }
-        player.dead=false; player.inv=110; player.vy=0;
+        player.dead=false; player.inv=150; player.vy=0;
         player.x=Math.max(camX+60,player.x); player.y=GROUND_Y-player.h;
       }
     }
@@ -315,11 +316,11 @@
       if (e.t%8<4) e.x += dir*0.5;
       // 开火
       e.cool--;
-      if (e.cool<=0 && !player.dead) {
-        e.cool = 70+Math.random()*50|0;
-        const sx=e.x+e.w/2, sy=e.y+12;
-        const a=Math.atan2((player.y+20)-sy,(player.x+13)-sx);
-        ebullets.push({x:sx,y:sy,vx:Math.cos(a)*4.4,vy:Math.sin(a)*4.4,r:5,life:160});
+      // 只朝正前方水平开火，玩家进入射程才打
+      if (e.cool<=0 && !player.dead && Math.abs(player.x-e.x)<520) {
+        e.cool = 120+Math.random()*80|0;
+        const sx=e.x+e.w/2+dir*14, sy=e.y+18;
+        ebullets.push({x:sx,y:sy,vx:dir*3.2,vy:0,r:5,life:220});
       }
     }
     // 炮台
@@ -327,11 +328,12 @@
       if (t.dead) continue;
       if (Math.abs(t.x-(camX+W/2))>W) continue;
       t.cool--;
+      // 炮台只能朝 8 个固定方向开火，弹速慢
       if (t.cool<=0 && !player.dead) {
-        t.cool=55+Math.random()*30|0;
+        t.cool=120+Math.random()*60|0;
         const sx=t.x+t.w/2, sy=t.y+t.h/2;
-        const a=Math.atan2((player.y+20)-sy,(player.x+13)-sx);
-        ebullets.push({x:sx,y:sy,vx:Math.cos(a)*5,vy:Math.sin(a)*5,r:5,life:200});
+        const a=snap8(Math.atan2((player.y+20)-sy,(player.x+13)-sx));
+        ebullets.push({x:sx,y:sy,vx:Math.cos(a)*3.4,vy:Math.sin(a)*3.4,r:5,life:260});
       }
     }
 
@@ -341,14 +343,16 @@
       if (boss.intro>0) boss.intro--;
       else {
         boss.y = GROUND_Y-180 + Math.sin(boss.t*0.03)*40;
-        if (boss.t%26===0) {
+        // 扇形弹：3 发慢速，弹道之间留出空隙可以躲
+        if (boss.t%60===0) {
           const sx=boss.x+10, sy=boss.y+boss.h*0.5;
-          for(let i=-2;i<=2;i++){ const a=Math.PI + i*0.22 + Math.sin(boss.t*0.05)*0.2; ebullets.push({x:sx,y:sy,vx:Math.cos(a)*5,vy:Math.sin(a)*5,r:6,life:220}); }
+          for(let i=-1;i<=1;i++){ const a=Math.PI + i*0.3; ebullets.push({x:sx,y:sy,vx:Math.cos(a)*3.4,vy:Math.sin(a)*3.4,r:6,life:300}); }
         }
-        if (boss.t%140<60 && boss.t%7===0) {
+        // 点射：开火前锁定一次方向，之后不再跟着玩家转
+        if (boss.t%200===100) boss.aimA = Math.atan2((player.y+20)-(boss.y+30),(player.x+13)-(boss.x+10));
+        if (boss.t%200>=100 && boss.t%200<130 && boss.t%10===0) {
           const sx=boss.x+10, sy=boss.y+30;
-          const a=Math.atan2((player.y+20)-sy,(player.x+13)-sx);
-          ebullets.push({x:sx,y:sy,vx:Math.cos(a)*7,vy:Math.sin(a)*7,r:5,life:200,col:"#ffd23f"});
+          ebullets.push({x:sx,y:sy,vx:Math.cos(boss.aimA)*4.5,vy:Math.sin(boss.aimA)*4.5,r:5,life:260,col:"#ffd23f"});
         }
       }
     }
@@ -364,6 +368,7 @@
     if (shakeT>0) shakeT--; if (flashT>0) flashT--;
   }
 
+  function snap8(a){ return Math.round(a/(Math.PI/4))*(Math.PI/4); }
   function rectHit(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
   function ptRect(px,py,r){ return px>r.x-6 && px<r.x+r.w+6 && py>r.y-6 && py<r.y+r.h+6; }
 
@@ -520,12 +525,26 @@
     ctx.closePath(); ctx.fill(); ctx.restore();
   }
 
+  // 双腿：anim>=0 时按步频交替摆动并抬脚，anim<0 表示在空中收腿
+  function drawLegs(hx, hy, f, anim, col, len){
+    ctx.strokeStyle=col; ctx.lineWidth=7; ctx.lineCap="round";
+    let l1x, l1y, l2x, l2y;
+    if (anim<0) { l1x=hx+f*7; l1y=hy+len*0.6; l2x=hx-f*5; l2y=hy+len*0.75; }
+    else {
+      const s=Math.sin(anim*0.28);
+      l1x=hx+s*8; l1y=hy+len-Math.max(0,-s)*5;
+      l2x=hx-s*8; l2y=hy+len-Math.max(0,s)*5;
+    }
+    ctx.beginPath(); ctx.moveTo(hx-3,hy); ctx.lineTo(l1x-3,l1y); ctx.moveTo(hx+3,hy); ctx.lineTo(l2x+3,l2y); ctx.stroke();
+    ctx.lineCap="butt";
+  }
+
   function drawPlayer(){
     const x=player.x,y=player.y,f=player.face;
     ctx.save();
     if (player.inv>0 && !player.dead) ctx.globalAlpha=0.6;
-    // 腿
-    ctx.fillStyle="#2f3a5e"; ctx.fillRect(x+4,y+30,8,16); ctx.fillRect(x+14,y+30,8,16);
+    // 腿：地面跑动时交替摆动，空中收腿
+    drawLegs(x+13, y+30, f, player.onFloor ? player.anim : -1, "#2f3a5e", 13);
     // 身体（突击队绿）
     ctx.fillStyle="#39d98a"; ctx.fillRect(x+3,y+12,20,20);
     ctx.fillStyle="#2bbd77"; ctx.fillRect(x+3,y+12,20,5);
@@ -545,7 +564,7 @@
 
   function drawGrunt(e){
     const x=e.x,y=e.y,f=e.face||1;
-    ctx.fillStyle="#3a2440"; ctx.fillRect(x+3,y+28,7,12); ctx.fillRect(x+14,y+28,7,12);
+    drawLegs(x+12, y+28, f, e.t, "#3a2440", 9);
     ctx.fillStyle="#c4406a"; ctx.fillRect(x+2,y+10,20,20);
     ctx.fillStyle="#a1335a"; ctx.fillRect(x+2,y+10,20,5);
     ctx.fillStyle="#2a1830"; ctx.fillRect(x+6,y,12,11); // 头
@@ -559,7 +578,7 @@
     ctx.fillStyle="#ffd23f"; ctx.beginPath(); ctx.arc(t.x+t.w/2,t.y+t.h/2,6,0,TAU); ctx.fill();
     // 瞄玩家的炮管
     const cx=t.x+t.w/2, cy=t.y+t.h/2;
-    const a=Math.atan2((player.y+20)-cy,(player.x+13)-cx);
+    const a=snap8(Math.atan2((player.y+20)-cy,(player.x+13)-cx));
     ctx.strokeStyle="#7b86a8"; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+Math.cos(a)*22,cy+Math.sin(a)*22); ctx.stroke();
   }
 
