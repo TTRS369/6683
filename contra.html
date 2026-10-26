@@ -171,9 +171,15 @@
   ];
   // 地面缺口（坑）：[x1,x2]
   const pits = [
-    [1480,1640],[2200,2340],[3050,3180],[3820,3980],[4600,4720]
+    [1500,1600],[2220,2320],[3060,3160],[3840,3940],[4610,4710]
   ];
   function onGround(x){ for(const p of pits) if(x>p[0]&&x<p[1]) return false; return true; }
+  // 找离 x 最近、双脚都踩在地上的位置（优先往回找），用于掉坑后复活
+  function safeX(x){
+    const ok = v => onGround(v+4) && onGround(v+player.w-4);
+    for (let d=0; d<400; d+=10) { if (x-d>=camX+4 && ok(x-d)) return x-d; if (ok(x+d)) return x+d; }
+    return x;
+  }
 
   // ---- 实体 ----
   const player = {
@@ -197,7 +203,7 @@
 
   function reset() {
     camX = 0; bullets=[]; ebullets=[]; particles=[]; pickups=[];
-    Object.assign(player, {x:80,y:GROUND_Y-46,vx:0,vy:0,onFloor:false,face:1,cool:0,weapon:0,wtimer:0,lives:5,inv:120,dead:false,respawn:0,anim:0});
+    Object.assign(player, {x:80,y:GROUND_Y-46,vx:0,vy:0,onFloor:false,face:1,cool:0,weapon:0,wtimer:0,lives:5,inv:120,dead:false,respawn:0,anim:0,coyote:0});
     score=0; killed=0; shakeT=0; flashT=0;
     Object.assign(boss,{active:false,x:LEVEL_LEN-220,y:GROUND_Y-180,hp:90,t:0,say:"",sayT:0,lowSaid:false,part:0,dead:false,intro:0});
     buildEnemies();
@@ -259,7 +265,8 @@
       player.vx = (keys.right?SPD:0) - (keys.left?SPD:0);
       if (keys.right) player.face=1; if (keys.left) player.face=-1;
       player.aimUp = keys.up; player.aimDown = keys.down;
-      if (keys.jump && player.onFloor) { player.vy = -12.2; player.onFloor=false; }
+      // 走出地面边缘后的短暂时间内仍可起跳，踩空一点也不会直接掉下去
+      if (keys.jump && (player.onFloor || player.coyote>0)) { player.vy = -12.8; player.onFloor=false; player.coyote=0; }
       player.vy += 0.6; if (player.vy>16) player.vy=16;
       player.x += player.vx; player.y += player.vy;
 
@@ -271,14 +278,15 @@
       // 地面 / 平台碰撞
       player.onFloor = false;
       const feet = player.y + player.h, cx = player.x + player.w/2;
-      if (player.vy>=0 && onGround(cx) && feet>=GROUND_Y && feet<=GROUND_Y+22) { player.y=GROUND_Y-player.h; player.vy=0; player.onFloor=true; }
+      if (player.vy>=0 && (onGround(player.x+4) || onGround(player.x+player.w-4)) && feet>=GROUND_Y && feet<=GROUND_Y+22) { player.y=GROUND_Y-player.h; player.vy=0; player.onFloor=true; }
       for (const p of platforms) {
         if (player.vy>=0 && cx>p.x && cx<p.x+p.w && feet>=p.y && feet<=p.y+18 && !keys.down) {
           player.y = p.y - player.h; player.vy=0; player.onFloor=true;
         }
       }
+      if (player.onFloor) player.coyote = 8; else if (player.coyote>0) player.coyote--;
       // 掉坑死亡
-      if (player.y > H+40) hurtPlayer(), player.y=GROUND_Y-player.h, player.x=Math.max(camX+40,player.x-60);
+      if (player.y > H+40) hurtPlayer(), player.y=GROUND_Y-player.h, player.x=safeX(player.x);
       if (player.inv>0) player.inv--;
       if (player.cool>0) player.cool--;
       if (keys.fire) tryFire();
@@ -290,7 +298,7 @@
       if (player.respawn<=0) {
         if (player.lives<=0) { endGame(false); return; }
         player.dead=false; player.inv=150; player.vy=0;
-        player.x=Math.max(camX+60,player.x); player.y=GROUND_Y-player.h;
+        player.x=safeX(Math.max(camX+60,player.x)); player.y=GROUND_Y-player.h;
       }
     }
 
