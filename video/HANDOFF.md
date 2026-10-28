@@ -11,15 +11,31 @@
 - 故事：方向二《迟到的消息》（她收到"他走了"的消息 → 走过回忆 → 发现他十年来每年都回路口等她 → 声波炸成他 → 想象中的十年 → 他化成光升空 → 绿灯，她走过去）。
 - 画质：要清晰，不加颗粒噪点。
 
-**还没确认（新窗口里先问用户）：**
-1. 分镜要不要改（见下表）。
-2. 音乐：继续用《Dusk Till Dawn》（自己看没问题，公开发布有版权风险），还是用 Suno 做一首原创。
-3. 用 Dusk Till Dawn 的话，用户要**重新上传那个 mp3**（音频文件不进仓库）。
+**音乐：** 用用户给的《Dusk Till Dawn》（ZAYN）。音频不进仓库，在
+`/root/.claude/uploads/.../4e29a766-Dusk_Till_Dawn-ZAYN.mp3`；新窗口里用户要**重新上传**。
+公开发布有版权风险，已在片尾署名"AI 生成动画 · 音乐 Dusk Till Dawn — ZAYN"。
 
-**进度：** 开头钩子已做好（`late.html`，0–14 秒：粒子拼出手机 → 3.32 秒消息到达 → 镜头推近 → 6.0 秒只剩"他走了。"→ 8.29 秒炸开 → 10.26 秒节奏进来时拼成片名 → 片名散去）。预览片 `late_hook.mp4` 已发给用户。
-渲染预览：`echo '{"duration":14}' > hook.timeline.json && CRF=16 node render.js late.html hook_silent.mp4 hook.timeline.json`
+**进度：全片九个镜头都做完了。** 代码在 `video/late/`：
+- `core.js` 粒子引擎（点云取样、仿射、morph 转场、合成+辉光）
+- `rig.js` 人物骨架 + 动作（走/跑/坐/抱膝）；`buildFigures()`
+- `world.js` 场景（房间/街道/路口透视/路口侧面）、道具、雨、季节光尘
+- `hook.js` 开头钩子（0–14 秒，原 `late.html` 移植过来）
+- `scenes.js` 九个镜头 scA–scI + 导演用的 `ALL`
+- `mv.html` 主页面（按时间选镜头，段落边界 morph/淡入）
 
-**下一步：** 等用户看完钩子的反馈，然后从主歌 1（黄昏的公寓）往后做。
+镜头：scA 公寓(14–32.4)、scB 夜街+回忆(32.4–64.9，morph 进入)、scC 争吵(64.9–96.7)、
+scD 路口静止(96.7–104)、scE 盒子+语音(104–153)、scF 十年等待(153–185.3)、
+scG 桥段播放(185.3–208.6)、scH 晨光重击+想象的十年(208.6–251.6)、scI 尾声(251.6–266)。
+
+**渲染全片：**
+```
+cd video/late && echo '{"duration":266,"fps":24}' > mv.timeline.json
+CRF=16 node ../render.js mv.html mv_silent.mp4 mv.timeline.json
+ffmpeg -y -i mv_silent.mp4 -i <歌.mp3> -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -shortest 迟到的消息.mp4
+```
+单帧检查：`node /tmp/.../late/still.js mv.html <输出目录> t1 t2 ...`（still.js 在 scratchpad/late）。
+
+**下一步：** 等用户看完全片反馈，按需要微调某个镜头（改 scenes.js 对应的 scX，重渲染即可）。
 
 ### 视觉规则
 - 现在（她，十年后的这一夜）：冷蓝白粒子
