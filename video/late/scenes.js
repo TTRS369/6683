@@ -306,4 +306,96 @@ const scE = (() => {
 function crossSignalSide(ctx, c, green) { const [rx, ry] = ap(camT(c), 1500, 352); glow(ctx, rx, ry, 56 * c.s, green ? "80,255,170" : "255,70,60", 0.6); }
 let scE_scr = null;
 
-const ALL = [scA, scB, scC, scD, scE];
+// 季节的粒子（雪、花瓣、落叶），画在前景，清晰不糊
+function season(ctx, t, kind, a, seed = 1) {
+  if (a <= 0.003) return; const n = kind === "rain" ? 420 : 260;
+  if (kind === "rain") { rain(ctx, t, n, "150,185,255", a * 0.7, { wind: 0.2, speed: 1500, len: 34 }); return; }
+  const col = kind === "snow" ? "235,244,255" : kind === "petal" ? "255,196,214" : "250,186,120";
+  const fall = kind === "snow" ? 70 : kind === "petal" ? 95 : 150, sway = kind === "leaf" ? 90 : 55;
+  for (let i = 0; i < n; i++) {
+    const h1 = hash(i + seed * 31), h2 = hash(i * 2.7 + seed), h3 = hash(i * 5.3 + seed * 7), z = 0.4 + h3;
+    const y = ((h2 * (H + 160) + t * fall * z) % (H + 160)) - 80, x = h1 * (W + 160) - 80 + Math.sin(t * (0.5 + h3) + h1 * 9) * sway;
+    const s = (1 + z * 2) * (kind === "snow" ? 1 : 1.3); ctx.fillStyle = `rgba(${col},${a * (0.3 + 0.6 * h3)})`;
+    if (kind === "leaf") { ctx.save(); ctx.translate(x, y); ctx.rotate(t * (0.8 + h2) + h1 * 6); ctx.fillRect(-s, -s * 0.5, s * 2, s); ctx.restore(); }
+    else { ctx.beginPath(); ctx.arc(x, y, s, 0, TAU); ctx.fill(); }
+  }
+}
+function caption(ctx, s, a, y = 905, sub) {
+  if (a <= 0.003) return; ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 16; ctx.fillStyle = "rgba(240,246,255,0.96)"; ctx.font = `400 56px ${SERIF}`; ctx.letterSpacing = "10px"; ctx.fillText(s, 960 + 5, y);
+  if (sub) { ctx.font = `300 22px ${UI}`; ctx.letterSpacing = "6px"; ctx.fillStyle = "rgba(200,216,255,0.8)"; ctx.fillText(sub, 960 + 3, y + 50); }
+  ctx.letterSpacing = "0px"; ctx.restore();
+}
+
+// ====================================================================
+// 镜头 F（153–185.3，beam / 副歌 2，反转）：这十年，每年的同一天，他都回到这个路口等她。
+// 季节在他身边更替，他没有走。每一年一个不同的等待的小景，字幕"第 N 年"。
+// 最后切到现在的她，拿着手机，拼命跑向这个路口。
+// ====================================================================
+const scF = (() => {
+  const t0 = 153.0;
+  const YR = 2.4, MONT = 24;                               // 每年 2.4 秒，共 10 年 24 秒
+  const kinds = ["snow", "petal", "rain", "leaf"];
+  // 每一年他在路口等待的样子（世界坐标在对面那头，scale 小）
+  function yearPose(n, p) {           // n: 0..9, p: 0..1 当年进度
+    const sway = Math.sin(p * TAU) * 0.04;
+    switch (n) {
+      case 0: return { pose: pose({ head: -0.06 + sway, sR: 0.1, eR: 0.2 }), x: 960, sit: 0 };                 // 抬头张望
+      case 1: return { pose: pose({ head: 0.4, sR: 0.5, eR: 1.4, sL: 0.4, eL: 1.3 }), x: 940, sit: 0, phone: 1 }; // 看手机
+      case 2: return { pose: SIT_BENCH, x: 1490, sit: 1 };                                                      // 坐长椅
+      case 3: return { pose: walk((p * 1.5) % 1, 0.6), x: mix(880, 1040, Math.sin(p * Math.PI)), sit: 0 };       // 踱步
+      case 4: return { pose: pose({ head: -0.05, lean: 0.02, sR: 0.08, eR: 0.16 }), x: 960, sit: 0 };            // 静静站
+      case 5: return { pose: pose({ head: 0.1, lean: 0.12, sR: 0.3, eR: 0.3 }), x: 654, sit: 0, lean: 1 };       // 靠着灯杆
+      case 6: return { pose: lerpPose(SIT_BENCH, pose({ head: 0.5 }), 0.5), x: 1490, sit: 1 };                   // 坐着低头
+      case 7: return { pose: pose({ head: 0.3, lean: 0.14, sR: 0.12, eR: 0.3 }), x: 960, sit: 0 };               // 站着佝偻
+      case 8: return { pose: SIT_KNEES, x: 900, sit: 1 };                                                        // 蹲坐
+      default: return { pose: pose({ head: 0.42 + sway * 0.5, lean: 0.1, sR: 0.1, eR: 0.22 }), x: 960, sit: 0 }; // 第10年：站着垂首
+    }
+  }
+  function back(ctx, lt, a) {
+    if (lt < MONT) { const c = camM(lt); nightSky(ctx, "#060a16", "#121a34", 575, c); crossLights(ctx, c, rgb(PAST.env), 0.5); crossSignal(ctx, c, 0, 0.8); }
+    else { const c = camRun(lt); nightSky(ctx, "#05070f", "#0b1430", 640, c); sideLights(ctx, c, rgb(NOW.env), 1, 0); }
+  }
+  function camM(lt) { const g = ss(0, MONT, lt); return { x: 960, y: mix(470, 540, g), s: mix(0.92, 1.12, g) }; }   // 整段极缓推近
+  function camRun(lt) { const p = (lt - MONT) / (32.3 - MONT), hx = mix(300, 1900, p); return handheld({ x: hx + 80, y: 600, s: 0.95 }, lt + t0, 1.4); }
+  function pts(P, lt) {
+    const t = lt + t0;
+    if (lt < MONT) {
+      const c = camM(lt), n = Math.min(9, Math.floor(lt / YR)), p = (lt - n * YR) / YR;
+      drawCross(P, c, t, PAST, 0.8);                        // 路口染成暖金（回忆/他的视角）
+      const y = yearPose(n, p), appear = ss(0, 0.18, p) * (1 - ss(0.9, 1, p));   // 年初聚拢、年末散开（季节一吹）
+      const u = ss(0.9, 1, p), e = ss(0, 0.16, p);
+      const fy = y.sit ? (y.x === 1490 ? 586 : CROSS.far + 150) : CROSS.far + 120;
+      const g = drawSide(P, "him", y.pose, y.x, fy, 0.6, 1, c, PAST.him, 0.92 * appear, t, { coat: 0, dim: 0.65, post: u > 0 ? dissolver(u, t, 0.6, -0.4, 180) : (e < 1 ? assembler(1 - e, t, 150) : null) });
+      if (y.phone) { const hp = g.at(g.b.handR); drawProp(P, PROP.oldPhone, c, hp[0], hp[1] - 6, 0, 0.3, PAST.hi, 0.8 * appear, t); }
+      // 对面行人灯旁，微微的暖光（他在等）
+      const [hx, hy] = ap(camT(c), y.x, fy - 60); glow(ctx, hx, hy, 50 * c.s, "255,200,140", 0.25 * appear);
+    } else {
+      // 现在：她拿着手机，拼命跑向路口
+      const c = camRun(lt), p = (lt - MONT) / (32.3 - MONT), hx = mix(300, 1900, p);
+      drawSideSet(P, c, t, NOW, 0.9); const ph = (hx / (500 * 0.95)) % 1;
+      const g = drawSide(P, "her", run(ph, 1), hx, STREET_Y, 0.92, 1, c, NOW.her, 1, t, { coat: 1 });
+      const hp = g.at([0, 0.3]); drawProp(P, PROP.oldPhone, c, hp[0], hp[1], 0.5, 0.42, [0.78, 0.9, 1], 0.85, t);
+    }
+  }
+  function fore(ctx, lt, a) {
+    const t = lt + t0;
+    if (lt < MONT) {
+      const n = Math.min(9, Math.floor(lt / YR)), p = (lt - n * YR) / YR;
+      season(ctx, t, kinds[n % 4], mix(0.5, 0.9, Math.sin(p * Math.PI)), n + 1);     // 季节在年中最盛
+      // 字幕"第 N 年"（中段淡入淡出）；第 10 年停得久一点
+      const capA = n < 9 ? ss(0.12, 0.3, p) * (1 - ss(0.7, 0.9, p)) : ss(0.12, 0.3, p);
+      caption(ctx, `第 ${["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"][n]} 年`, capA, 160);
+      if (n === 0) caption(ctx, "", 0);                                              // 占位
+    } else {
+      season(ctx, t, "rain", 0.8, 2);
+      if (lt < MONT + 1.2) caption(ctx, "他一直在等。", ss(MONT, MONT + 0.5, lt) * (1 - ss(MONT + 2.2, MONT + 3, lt)), 160);
+    }
+    vignette(ctx, 0.5); bars(ctx, 60);
+    // 段落开头从上一镜头接进来
+    fade(ctx, (1 - ss(0, 0.5, lt)) * 0.6);
+  }
+  return { t0, t1: 185.3, back, pts, fore, cam: camM };
+})();
+
+const ALL = [scA, scB, scC, scD, scE, scF];
