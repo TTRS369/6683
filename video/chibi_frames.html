@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>极简小人样张</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// 极简卡通风样张：原创的两个圆脑袋小人（他：头顶一撮翘毛、灰白、深蓝围巾；她：短发、发夹、米白色）
+// window.draw(scene, t)：scene 是 room（月光房间里抱膝哭）| crossing（雨夜路口隔着斑马线对望）
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function glow(x, y, r, col, a) { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.45, `rgba(${col},${a * 0.3})`); g.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); }
+
+// 圆头，左上受光、右下背光，边缘一道冷色轮廓光
+function shadedBall(x, y, r, base, dark, rimCol, lightDir = [-0.5, -0.6]) {
+  const g = ctx.createRadialGradient(x + lightDir[0] * r * 0.5, y + lightDir[1] * r * 0.5, r * 0.1, x, y, r * 1.05);
+  g.addColorStop(0, base); g.addColorStop(1, dark);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+  if (rimCol) { ctx.save(); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.clip(); ctx.strokeStyle = rimCol; ctx.lineWidth = r * 0.12; ctx.beginPath(); ctx.arc(x - lightDir[0] * r * 0.06, y - lightDir[1] * r * 0.06, r, Math.atan2(lightDir[1], lightDir[0]) - 1.2, Math.atan2(lightDir[1], lightDir[0]) + 1.2); ctx.stroke(); ctx.restore(); }
+}
+// 表情：sad 时眉毛八字、眼睛下垂、含泪
+function face(x, y, r, o = {}) {
+  const sad = o.sad ?? 0, look = o.look || [0, 0];
+  ctx.strokeStyle = "#2a2e3e"; ctx.lineCap = "round"; ctx.lineWidth = r * 0.07;
+  for (const s of [-1, 1]) {
+    const ex = x + s * r * 0.34 + look[0] * r * 0.12, ey = y + r * 0.08 + look[1] * r * 0.1;
+    // 眉毛
+    ctx.beginPath(); ctx.moveTo(ex - s * r * 0.16, ey - r * (0.3 + 0.14 * sad)); ctx.quadraticCurveTo(ex, ey - r * (0.33 + 0.02 * sad), ex + s * r * 0.16, ey - r * (0.3 - 0.08 * sad)); ctx.stroke();
+    // 眼睛（下垂的椭圆）和高光
+    ctx.fillStyle = "#1e2130"; ctx.beginPath(); ctx.ellipse(ex, ey, r * 0.1, r * (0.15 - 0.03 * sad), -s * 0.25 * sad, 0, TAU); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.beginPath(); ctx.arc(ex - r * 0.03, ey - r * 0.05, r * 0.035, 0, TAU); ctx.fill();
+    if (sad > 0.5) { ctx.fillStyle = "rgba(160,210,255,.55)"; ctx.beginPath(); ctx.ellipse(ex, ey + r * 0.13, r * 0.11, r * 0.04, 0, 0, TAU); ctx.fill(); }
+  }
+  // 嘴：难过时是一道抖动的弧
+  ctx.lineWidth = r * 0.055; ctx.beginPath();
+  if (sad > 0.5) { ctx.moveTo(x - r * 0.16, y + r * 0.44); ctx.bezierCurveTo(x - r * 0.06, y + r * 0.36, x + r * 0.06, y + r * 0.42, x + r * 0.16, y + r * 0.4); }
+  else { ctx.moveTo(x - r * 0.1, y + r * 0.42); ctx.quadraticCurveTo(x, y + r * 0.47, x + r * 0.1, y + r * 0.42); }
+  ctx.stroke();
+  // 泪痕
+  if (o.tears) { ctx.strokeStyle = "rgba(170,215,255,.6)"; ctx.lineWidth = r * 0.04; for (const s of [-1, 1]) { const ex = x + s * r * 0.34; ctx.beginPath(); ctx.moveTo(ex + s * r * 0.04, y + r * 0.22); ctx.quadraticCurveTo(ex + s * r * 0.1, y + r * 0.42, ex + s * r * 0.06, y + r * 0.6); ctx.stroke(); } }
+}
+
+// ---------- 场景一：月光房间里，他抱着膝盖哭 ----------
+function room(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#0c1430"); g.addColorStop(1, "#05070f"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // 墙角线和地板
+  ctx.fillStyle = "#080c1c"; ctx.fillRect(0, 760, W, H - 760);
+  // 窗：月光从外面照进来
+  ctx.fillStyle = "#3a5ab8"; ctx.fillRect(220, 40, 700, 360);
+  const wg = ctx.createLinearGradient(220, 40, 920, 400); wg.addColorStop(0, "rgba(140,180,255,.6)"); wg.addColorStop(1, "rgba(60,90,180,.2)"); ctx.fillStyle = wg; ctx.fillRect(220, 40, 700, 360);
+  ctx.fillStyle = "#101830"; ctx.fillRect(560, 40, 16, 360); ctx.fillRect(220, 210, 700, 12); ctx.fillRect(200, 395, 740, 20);
+  // 窗帘
+  for (const [x, w] of [[150, 110], [880, 120]]) { const cg = ctx.createLinearGradient(x, 0, x + w, 0); cg.addColorStop(0, "#2a3c80"); cg.addColorStop(0.5, "#5a78d0"); cg.addColorStop(1, "#24346c"); ctx.fillStyle = cg; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + w, 0); ctx.quadraticCurveTo(x + w - 10, 300, x + w + 6, 560); ctx.lineTo(x - 6, 560); ctx.quadraticCurveTo(x + 10, 300, x, 0); ctx.fill(); }
+  // 月光投在地上的光斑
+  ctx.globalCompositeOperation = "lighter";
+  const beam = ctx.createLinearGradient(300, 400, 600, 1080); beam.addColorStop(0, "rgba(120,160,255,.14)"); beam.addColorStop(1, "rgba(120,160,255,.02)");
+  ctx.fillStyle = beam; ctx.beginPath(); ctx.moveTo(220, 410); ctx.lineTo(920, 410); ctx.lineTo(1040, 1080); ctx.lineTo(60, 1080); ctx.fill();
+  ctx.fillStyle = "rgba(130,170,255,.32)";
+  for (const [x, y] of [[120, 900], [440, 900]]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 290, y); ctx.lineTo(x + 330, y + 120); ctx.lineTo(x + 30, y + 120); ctx.fill(); }
+  const r = rng(4); for (let i = 0; i < 80; i++) { const x = 250 + r() * 700 + Math.sin(t * 0.4 + i) * 20, y = 420 + r() * 600 + Math.cos(t * 0.3 + i) * 14; ctx.fillStyle = `rgba(180,210,255,${0.2 + 0.3 * r()})`; ctx.fillRect(x, y, 2, 2); }
+  ctx.globalCompositeOperation = "source-over";
+  // 他：正面靠墙坐着，两个膝盖竖在身前，双臂绕过来抱住膝盖，脸埋在手臂上，只露出眼睛
+  const x = 1400, y = 830, s = 1.3;
+  ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.beginPath(); ctx.ellipse(x, y + 6 * s, 170 * s, 24 * s, 0, 0, TAU); ctx.fill();
+  const body = ctx.createLinearGradient(x - 110 * s, 0, x + 110 * s, 0); body.addColorStop(0, "#8a96bc"); body.addColorStop(1, "#343c5a");
+  ctx.fillStyle = body; ctx.beginPath(); ctx.ellipse(x, y - 95 * s, 108 * s, 96 * s, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = "#2e3552"; ctx.beginPath(); ctx.ellipse(x - 46 * s, y - 8 * s, 40 * s, 18 * s, 0, 0, TAU); ctx.ellipse(x + 46 * s, y - 8 * s, 40 * s, 18 * s, 0, 0, TAU); ctx.fill();
+  // 两个并排竖起的膝盖
+  for (const k of [-1, 1]) shadedBall(x + k * 42 * s, y - 150 * s, 54 * s, "#aab4d4", "#465074", k < 0 ? "rgba(160,190,255,.6)" : null);
+  // 头：压在膝盖上，微微低着
+  const hx = x, hy = y - 285 * s, hr = 118 * s;
+  shadedBall(hx, hy, hr, "#c6cee6", "#525c80", "rgba(170,200,255,.8)");
+  ctx.strokeStyle = "#6a7498"; ctx.lineWidth = 7 * s; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(hx + 10 * s, hy - hr + 4 * s); ctx.quadraticCurveTo(hx + 30 * s, hy - hr - 40 * s, hx + 52 * s, hy - hr - 22 * s); ctx.stroke();
+  face(hx, hy - 18 * s, hr * 0.85, { sad: 1, tears: true, look: [-0.2, 0.5] });
+  // 双臂：从两肩绕到膝盖前面，在正中交握，挡住嘴
+  const armCol = ctx.createLinearGradient(x - 120 * s, 0, x + 120 * s, 0); armCol.addColorStop(0, "#a2aed0"); armCol.addColorStop(1, "#5a6488");
+  ctx.strokeStyle = armCol; ctx.lineWidth = 50 * s; ctx.lineCap = "round";
+  for (const k of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + k * 108 * s, y - 150 * s); ctx.quadraticCurveTo(x + k * 96 * s, y - 205 * s, x + k * 22 * s, y - 200 * s); ctx.stroke(); }
+  ctx.fillStyle = "#c2cce6"; for (const k of [-1, 1]) { ctx.beginPath(); ctx.arc(x + k * 16 * s, y - 202 * s, 22 * s, 0, TAU); ctx.fill(); }
+  // 暗角
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.6)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+
+// ---------- 场景二：雨夜路口，隔着斑马线对望 ----------
+function chibi(x, y, s, who, o = {}) {
+  const base = who === "him" ? ["#c6cee6", "#525c80"] : ["#eee4d6", "#8a7a70"];
+  ctx.fillStyle = "rgba(0,0,0,.4)"; ctx.beginPath(); ctx.ellipse(x, y, 70 * s, 12 * s, 0, 0, TAU); ctx.fill();
+  // 身体、腿
+  ctx.fillStyle = who === "him" ? "#3a4260" : "#6a5a58";
+  ctx.beginPath(); ctx.roundRect(x - 22 * s, y - 50 * s, 18 * s, 50 * s, 8 * s); ctx.roundRect(x + 4 * s, y - 50 * s, 18 * s, 50 * s, 8 * s); ctx.fill();
+  const bg = ctx.createLinearGradient(x - 60 * s, 0, x + 60 * s, 0); bg.addColorStop(0, who === "him" ? "#8a96bc" : "#d8cabc"); bg.addColorStop(1, who === "him" ? "#3a4260" : "#7a6a62");
+  ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(x, y - 90 * s, 56 * s, 56 * s, 0, 0, TAU); ctx.fill();
+  if (who === "him") { ctx.fillStyle = "#24407a"; ctx.beginPath(); ctx.ellipse(x, y - 142 * s, 50 * s, 18 * s, 0, 0, TAU); ctx.fill(); ctx.fillRect(x + 20 * s, y - 140 * s, 16 * s, 60 * s); }
+  // 伞
+  if (o.umbrella) { ctx.strokeStyle = "#1a1a24"; ctx.lineWidth = 4 * s; ctx.beginPath(); ctx.moveTo(x + 40 * s, y - 80 * s); ctx.lineTo(x + 40 * s, y - 320 * s); ctx.stroke(); ctx.fillStyle = o.umbrella; ctx.beginPath(); ctx.moveTo(x - 150 * s, y - 300 * s); ctx.quadraticCurveTo(x + 40 * s, y - 440 * s, x + 230 * s, y - 300 * s); ctx.closePath(); ctx.fill(); }
+  const hr = 80 * s, hx = x, hy = y - 220 * s;
+  shadedBall(hx, hy, hr, base[0], base[1], o.rim, [o.lightX ?? -0.5, -0.6]);
+  if (who === "him") { ctx.strokeStyle = "#6a7498"; ctx.lineWidth = 6 * s; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(hx + 8 * s, hy - hr + 4 * s); ctx.quadraticCurveTo(hx + 24 * s, hy - hr - 32 * s, hx + 42 * s, hy - hr - 18 * s); ctx.stroke(); }
+  else { ctx.fillStyle = "#3a2e2c"; ctx.beginPath(); ctx.arc(hx, hy - 8 * s, hr * 1.02, Math.PI * 0.92, Math.PI * 2.08); ctx.lineTo(hx + hr * 0.9, hy + hr * 0.35); ctx.quadraticCurveTo(hx + hr * 0.6, hy - hr * 0.3, hx, hy - hr * 0.55); ctx.quadraticCurveTo(hx - hr * 0.6, hy - hr * 0.3, hx - hr * 0.9, hy + hr * 0.35); ctx.closePath(); ctx.fill(); ctx.fillStyle = "#e05a6a"; ctx.beginPath(); ctx.ellipse(hx + hr * 0.55, hy - hr * 0.45, 14 * s, 8 * s, 0.5, 0, TAU); ctx.fill(); }
+  face(hx + (o.look ? o.look[0] * 10 : 0), hy + 6 * s, hr * 0.82, { sad: o.sad ?? 0.7, look: o.look, tears: o.tears });
+}
+function crossing(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#070b1c"); g.addColorStop(0.62, "#142048"); g.addColorStop(1, "#04060e"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // 远处的楼和亮着的窗
+  const r = rng(9); let x = -30;
+  while (x < W) { const w = 140 + r() * 180, h = 240 + r() * 300; ctx.fillStyle = "#0c1230"; ctx.fillRect(x, 700 - h, w, h); for (let yy = 700 - h + 24; yy < 680; yy += 36) for (let xx = x + 14; xx < x + w - 18; xx += 28) if (r() < 0.25) { ctx.fillStyle = "rgba(255,214,150,.75)"; ctx.fillRect(xx, yy, 12, 16); } x += w + 10; }
+  // 湿路面和斑马线，红灯映在地上
+  ctx.fillStyle = "#070a16"; ctx.fillRect(0, 700, W, H - 700);
+  for (let i = 0; i < 8; i++) { const y = 760 + i * 38; ctx.fillStyle = `rgba(170,190,230,${0.18 + i * 0.02})`; ctx.fillRect(360, y, 1200, 14 + i * 2); }
+  ctx.globalCompositeOperation = "lighter";
+  glow(250, 330, 160, "255,50,60", 0.55); const rr = ctx.createLinearGradient(0, 700, 0, H); rr.addColorStop(0, "rgba(255,50,60,.45)"); rr.addColorStop(1, "rgba(255,50,60,0)"); ctx.fillStyle = rr; ctx.fillRect(220, 700, 60, H - 700);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#0a0a12"; ctx.fillRect(244, 330, 12, 400); ctx.fillRect(222, 270, 56, 110); ctx.fillStyle = "#ff3a44"; ctx.beginPath(); ctx.arc(250, 300, 16, 0, TAU); ctx.fill();
+  chibi(560, 760, 1.15, "him", { sad: 0.8, look: [0.8, 0], rim: "rgba(255,90,100,.7)", lightX: 0.6 });
+  chibi(1380, 760, 1.05, "her", { sad: 0.9, look: [-0.8, 0], umbrella: "#b8384a", rim: "rgba(255,210,170,.6)", tears: true });
+  // 雨
+  ctx.strokeStyle = "rgba(190,205,240,.3)"; ctx.lineWidth = 1.5; const q = rng(21);
+  for (let i = 0; i < 420; i++) { const xx = q() * W, yy = (q() * H + t * 900) % H; ctx.beginPath(); ctx.moveTo(xx, yy); ctx.lineTo(xx - 6, yy + 26); ctx.stroke(); }
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.55)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+
+window.draw = (scene, t = 0) => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ({ room, crossing })[scene](t); };
+window.ready = Promise.resolve(true);
+</script>
+</body>
+</html>
