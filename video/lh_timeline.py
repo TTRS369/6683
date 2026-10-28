@@ -27,10 +27,15 @@ def env(x):
 
 
 bass = sosfilt(butter(2, 160, "lowpass", fs=sr, output="sos"), y)
+# 节拍网格：每拍的时间，以及每小节第一拍（以低音进入那一拍为基准对齐小节）
+_, beats = librosa.beat.beat_track(y=librosa.resample(y, orig_sr=sr, target_sr=22050), sr=22050, units="time", start_bpm=89)
+phase = int(np.argmin(np.abs(beats - 32.4))) % 4
+downbeats = [round(float(b), 3) for i, b in enumerate(beats) if i % 4 == phase]
 marks = {"night": 32.4, "storm": 64.9, "dark": 96.7, "climb": 104.0, "beam": 153.0, "bridge": 185.3, "dawn": 208.6, "outro": 251.6}
 order = ["dusk"] + list(marks)
 starts = [0.0] + list(marks.values())
 sections = {k: [round(a, 2), round(b, 2)] for k, a, b in zip(order, starts, starts[1:] + [dur])}
-tl = {"duration": round(dur, 2), "fps": FPS, "sections": sections, "energy": env(y), "bass": env(bass)}
+tl = {"duration": round(dur, 2), "fps": FPS, "sections": sections, "energy": env(y), "bass": env(bass),
+      "beats": [round(float(b), 3) for b in beats], "downbeats": downbeats}
 json.dump(tl, open(sys.argv[2], "w", encoding="utf8"))
 print(json.dumps(sections))

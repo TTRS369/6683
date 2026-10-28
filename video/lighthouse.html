@@ -152,12 +152,19 @@ function lighthouse(c, t, beamOn = true) {
   c.fillStyle = `rgba(255,210,140,${0.5 * n})`; for (const wy of [520, 440, 360]) c.fillRect(LH_X - 6, wy, 12, 20);
   // 旋转的光束：转到朝向镜头时最亮
   if (lv > 0 && beamOn) {
-    const ang = t * 0.9, facing = Math.sin(ang), dir = Math.cos(ang), len = 1900 * Math.abs(dir), half = 110 + 160 * (1 - Math.abs(dir));
+    const ang = t * 0.9, facing = Math.sin(ang), dir = Math.cos(ang), len = 1900 * Math.abs(dir), half = (110 + 160 * (1 - Math.abs(dir))) * clamp(Math.abs(dir) * 4);   // 侧转时光束收窄，避免压成一条竖线
     c.globalCompositeOperation = "lighter";
     const bx = LH_X + dir * len, g = c.createLinearGradient(LH_X, LAMP_Y, bx, LAMP_Y);
     g.addColorStop(0, `rgba(255,240,200,${0.5 * lv * (0.7 + 0.3 * e)})`); g.addColorStop(1, "rgba(255,240,200,0)");
     c.fillStyle = g; c.beginPath(); c.moveTo(LH_X, LAMP_Y - 6); c.lineTo(bx, LAMP_Y - half); c.lineTo(bx, LAMP_Y + half); c.lineTo(LH_X, LAMP_Y + 6); c.fill();
     glow(c, LH_X, LAMP_Y, 90 + 260 * Math.max(0, facing), "255,236,190", lv * (0.5 + 0.5 * Math.max(0, facing)));
+    // 光束正对镜头时，拉出一道横向的变形宽银幕光芒
+    if (facing > 0.5) {
+      const fa = (facing - 0.5) * 2 * lv, gs = c.createLinearGradient(LH_X - 1100, 0, LH_X + 1100, 0);
+      gs.addColorStop(0, "rgba(150,190,255,0)"); gs.addColorStop(0.5, `rgba(190,215,255,${0.6 * fa})`); gs.addColorStop(1, "rgba(150,190,255,0)");
+      c.fillStyle = gs; c.fillRect(LH_X - 1100, LAMP_Y - 3, 2200, 6);
+      glow(c, LH_X, LAMP_Y, 40, "255,255,255", 0.8 * fa);
+    }
     c.globalCompositeOperation = "source-over";
   }
 }
@@ -330,64 +337,200 @@ function shotDock(c, t) {
   c.globalCompositeOperation = "lighter"; glow(c, 1300, 420, 700, "255,200,140", 0.3); c.globalCompositeOperation = "source-over";
 }
 
-// ---------- 剪辑表：每个镜头的起止时间 ----------
-const n0 = S.night[0], s0 = S.storm[0], b0 = S.beam[0], r0 = S.bridge[0], d0 = S.dawn[0];
-const CUTS = [
-  [0, n0, (c, t) => shotWide(c, t, [lerp(1000, 900, clamp(t / n0)), 560, lerp(1.2, 1.0, clamp(t / n0))])],
-  [n0, n0 + 11.6, (c, t) => shotWide(c, t, [760, 500, 1.15])],
-  [n0 + 11.6, n0 + 21.4, shotWindow],
-  [n0 + 21.4, s0, (c, t) => shotWide(c, t, [1480, 580, 2.2])],
-  [s0, s0 + 5.4, (c, t) => shotWide(c, t)], [s0 + 5.4, s0 + 10.8, shotBoat], [s0 + 10.8, s0 + 16.2, (c, t) => shotWide(c, t, [600, 480, 1.25])],
-  [s0 + 16.2, s0 + 21.6, shotBoat], [s0 + 21.6, s0 + 27.0, shotWindow], [s0 + 27.0, S.dark[0], shotBoat],
-  [S.dark[0], S.climb[0], (c, t) => shotWide(c, t, [700, 480, 1.1])],
-  [S.climb[0], RELIGHT - 3, shotStairs],
-  [RELIGHT - 3, b0, (c, t) => shotLamp(c, t)],
-  [b0, b0 + 5.4, (c, t) => shotWide(c, t)], [b0 + 5.4, b0 + 10.8, shotBoat], [b0 + 10.8, b0 + 16.2, (c, t) => shotLamp(c, t)],
-  [b0 + 16.2, b0 + 21.6, (c, t) => shotWide(c, t, [1200, 560, 1.15])], [b0 + 21.6, b0 + 27.0, shotBoat], [b0 + 27.0, r0, (c, t) => shotWide(c, t)],
-  [r0, r0 + 7.7, (c, t) => shotWide(c, t, [900, 520, 1.05])], [r0 + 7.7, r0 + 15.2, (c, t) => shotLamp(c, t, true)],
-  [r0 + 15.2, r0 + 20.2, shotBoat], [r0 + 20.2, d0, (c, t) => shotWide(c, t, [1100, 540, 1.2])],
-  [d0, d0 + 26, (c, t) => shotWide(c, t, [lerp(1000, 920, ss(d0, d0 + 26, t)), 560, lerp(1.2, 1.05, ss(d0, d0 + 26, t))])],
-  [d0 + 26, S.outro[0], shotDock],
-  [S.outro[0], TL.duration + 1, (c, t) => shotWide(c, t, [lerp(960, 900, ss(S.outro[0], TL.duration, t)), 540, lerp(1.05, 1.0, ss(S.outro[0], TL.duration, t))])],
-];
-const FADE = 0.35;   // 跟着节拍硬切，只留很短的交叉
-const layers = [0, 1].map(() => { const o = document.createElement("canvas"); o.width = W; o.height = H; return o; });
-const VIG = (() => { const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, H); g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,.3)"); return g; })();
+// ---------- 剪辑表 ----------
+// 所有切点都卡在小节第一拍上（DB），剧情节点和音乐的爆发、收、重击对齐。
+// 每个镜头：a 开始、b 结束、fn 画面、tr 进入这个镜头时用的转场、map 镜头内的故事时间（片头倒叙、慢动作）、
+// push 镜头内的缓慢推近（起止缩放）、lens 是否在镜头前挂雨滴。
+const DB = TL.downbeats;
+const db = k => DB[Math.min(k, DB.length - 1)];
+const d0 = S.dawn[0];
+const moveCam = (a, b, from, to) => (c, tt, t) => { const p = ss(a, b, t) * 0.4 + clamp((t - a) / (b - a)) * 0.6; shotWide(c, tt, [lerp(from[0], to[0], p), lerp(from[1], to[1], p), lerp(from[2], to[2], p)]); };
+const slowmo = (a, dur, lag) => t => t - lag * ss(a, a + dur, t);
+const at = (story, speed, a) => t => story + (t - a) * speed;
+const sh = (a, b, fn, tr, o = {}) => ({ a, b, fn, tr, map: o.map || (t => t), push: o.push || [1, 1.05], lens: !!o.lens });
+const black = c => { c.fillStyle = "#000"; c.fillRect(0, 0, W, H); };
+const titleBG = (c, tt) => { shotWide(c, tt, [800, 470, 1.0]); c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(0, 0, W, H); };
+const wrap = f => (c, tt) => f(c, tt);
 
-function titleCard(t, a, b, title, sub) {
-  const al = win(t, a, b, 1.6);
+const CUTS = [
+  // 片头钩子：先闪回三个"那一夜"的画面，再黑屏、出片名
+  sh(0.6, 1.9, (c, tt) => shotWide(c, tt, [420, 380, 1.6]), "dip", { map: at(S.dark[0] - 0.25, 0.35, 0.6), push: [1.1, 1.2] }),
+  sh(1.9, 3.2, wrap(shotStairs), "glitch", { map: at(S.climb[0] + 24, 0.6, 1.9), push: [1.15, 1.3] }),
+  sh(3.2, 4.5, wrap(shotBoat), "glitch", { map: at(S.beam[0] + 7.2, 0.4, 3.2), push: [1.1, 1.2], lens: true }),
+  sh(4.5, 6.4, black, "flash"),
+  sh(6.4, db(0), titleBG, "dip", { map: at(S.night[0] + 6, 0.6, 6.4), push: [1.0, 1.08] }),
+  // 黄昏：她在灯塔上目送他出海
+  sh(db(0), db(3), moveCam(db(0), db(3), [420, 330, 1.9], [800, 520, 1.15]), "dissolve"),
+  sh(db(3), db(5), wrap(shotBoat), "cut", { push: [1.05, 1.12] }),
+  sh(db(5), db(8), moveCam(db(5), db(8), [1000, 560, 1.2], [900, 560, 1.0]), "dissolve"),
+  // 入夜：低音进来的那一拍，灯亮起
+  sh(db(8), db(11), moveCam(db(8), db(11), [520, 330, 1.5], [760, 500, 1.12]), "flash"),
+  sh(db(11), db(14), wrap(shotWindow), "zoom", { push: [1.0, 1.1] }),
+  sh(db(14), db(17), moveCam(db(14), db(17), [1480, 590, 2.3], [1450, 580, 2.0]), "dissolve"),
+  sh(db(17), db(20), moveCam(db(17), db(20), [700, 480, 1.05], [900, 520, 1.2]), "cut"),
+  // 风暴：第一次副歌，两小节一切，最后一段一小节一切
+  sh(db(20), db(22), moveCam(db(20), db(22), [960, 540, 1.0], [900, 520, 1.1]), "flash"),
+  sh(db(22), db(24), wrap(shotBoat), "whip", { lens: true }),
+  sh(db(24), db(26), moveCam(db(24), db(26), [600, 470, 1.3], [540, 440, 1.4]), "whip"),
+  sh(db(26), db(28), wrap(shotBoat), "glitch", { lens: true }),
+  sh(db(28), db(29), wrap(shotWindow), "whip", { lens: true, push: [1.05, 1.15] }),
+  sh(db(29), db(30), wrap(shotBoat), "whip", { lens: true, push: [1.1, 1.2] }),
+  sh(db(30), db(31), moveCam(db(30), db(31), [500, 420, 1.5], [470, 400, 1.6]), "glitch"),
+  sh(db(31), db(32), wrap(shotBoat), "whip", { lens: true, push: [1.15, 1.25] }),
+  // 闪电劈中灯塔：慢动作
+  sh(db(32), db(34), moveCam(db(32), db(34), [420, 360, 1.5], [600, 450, 1.2]), "flash", { map: slowmo(db(32), 2.0, 1.0) }),
+  // 她爬上灯塔
+  sh(db(34), db(41), wrap(shotStairs), "zoom", { push: [1.0, 1.08] }),
+  sh(db(41), db(43), moveCam(db(41), db(43), [700, 480, 1.1], [650, 470, 1.2]), "cut"),
+  sh(db(43), db(45), wrap(shotBoat), "whip", { lens: true }),
+  sh(db(45), db(51), wrap(shotStairs), "glitch", { push: [1.05, 1.15] }),
+  sh(db(51), db(53), (c, tt) => shotLamp(c, tt), "zoom", { push: [1.0, 1.06] }),
+  // 灯重新亮起：第二次副歌
+  sh(db(53), db(55), moveCam(db(53), db(55), [520, 330, 1.6], [800, 500, 1.1]), "flash"),
+  sh(db(55), db(57), wrap(shotBoat), "whip", { lens: true }),
+  sh(db(57), db(59), (c, tt) => shotLamp(c, tt), "whip"),
+  sh(db(59), db(61), moveCam(db(59), db(61), [1200, 560, 1.15], [1100, 560, 1.25]), "whip"),
+  sh(db(61), db(63), wrap(shotBoat), "glitch", { lens: true }),
+  sh(db(63), db(65), moveCam(db(63), db(65), [960, 540, 1.0], [880, 520, 1.1]), "whip"),
+  // 暴风眼：安静下来
+  sh(db(65), db(67), moveCam(db(65), db(67), [900, 520, 1.05], [950, 530, 1.15]), "dip"),
+  sh(db(67), db(70), (c, tt) => shotLamp(c, tt, true), "dissolve", { push: [1.0, 1.1] }),
+  sh(db(70), db(72), wrap(shotBoat), "dissolve", { push: [1.0, 1.08] }),
+  sh(db(72), d0, moveCam(db(72), d0, [1100, 540, 1.25], [1150, 545, 1.35]), "dissolve"),
+  // 晨光那一记重击：慢动作、黑边打开
+  sh(d0, db(77), moveCam(d0, db(77), [1000, 560, 1.2], [930, 560, 1.05]), "flash", { map: slowmo(d0, 2.5, 0.9) }),
+  sh(db(77), db(79), wrap(shotBoat), "dissolve", { push: [1.0, 1.08] }),
+  sh(db(79), db(84), moveCam(db(79), db(84), [700, 640, 1.5], [640, 700, 1.35]), "dissolve"),
+  sh(db(84), S.outro[0], wrap(shotDock), "dissolve", { push: [1.0, 1.08] }),
+  sh(S.outro[0], TL.duration + 1, moveCam(S.outro[0], TL.duration, [960, 540, 1.15], [900, 540, 1.0]), "dissolve"),
+];
+const TRDUR = { cut: 0, flash: 0.5, whip: 0.45, zoom: 0.6, glitch: 0.36, dissolve: 1.2, dip: 1.6 };
+
+// ---------- 合成 ----------
+const mk = (w, h) => { const o = document.createElement("canvas"); o.width = w; o.height = h; return o; };
+const LA = mk(W, H), LB = mk(W, H), FR = mk(W, H), SM = mk(W / 6, H / 6);
+const eio = p => p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+function drawShot(i, t, L) {
+  const c = L.getContext("2d"), s = CUTS[i], tt = s.map(t);
+  c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over"; c.filter = "none";
+  c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+  const z = lerp(s.push[0], s.push[1], clamp((t - s.a) / (s.b - s.a)));
+  c.save(); c.translate(W / 2, H / 2); c.scale(z, z); c.translate(-W / 2, -H / 2);
+  s.fn(c, tt, t);
+  c.restore();
+  return tt;
+}
+// 找出 t 时刻是哪个镜头，或者正处在哪个转场里
+function compose(t) {
+  const f = FR.getContext("2d");
+  f.setTransform(1, 0, 0, 1, 0, 0); f.globalAlpha = 1; f.globalCompositeOperation = "source-over"; f.filter = "none";
+  f.fillStyle = "#000"; f.fillRect(0, 0, W, H);
+  if (t < CUTS[0].a - TRDUR[CUTS[0].tr] / 2) return { tt: t, shot: -1 };
+  for (let k = 0; k < CUTS.length; k++) {
+    const d = TRDUR[CUTS[k].tr];
+    if (d > 0 && Math.abs(t - CUTS[k].a) < d / 2) {
+      const p = (t - (CUTS[k].a - d / 2)) / d, e = eio(p);
+      const ttIn = drawShot(k, t, LB);
+      if (k > 0) drawShot(k - 1, t, LA); else LA.getContext("2d").clearRect(0, 0, W, H);
+      const tr = CUTS[k].tr;
+      if (tr === "dissolve") { f.drawImage(LA, 0, 0); f.globalAlpha = e; f.drawImage(LB, 0, 0); }
+      else if (tr === "dip") { f.globalAlpha = 1 - ss(0, 0.5, p); f.drawImage(LA, 0, 0); f.globalAlpha = ss(0.5, 1, p); f.drawImage(LB, 0, 0); }
+      else if (tr === "flash") { f.drawImage(p < 0.5 ? LA : LB, 0, 0); f.globalAlpha = Math.pow(1 - Math.abs(2 * p - 1), 1.5); f.fillStyle = "#fff8ee"; f.fillRect(0, 0, W, H); }
+      else if (tr === "whip") {
+        f.filter = `blur(${Math.sin(Math.PI * p) * 34}px)`;
+        f.drawImage(LA, -e * W * 0.7, 0); f.drawImage(LB, (1 - e) * W * 0.7, 0); f.filter = "none";
+      } else if (tr === "zoom") {
+        f.save(); f.translate(W / 2, H / 2); f.scale(1 + e * 1.3, 1 + e * 1.3); f.globalAlpha = 1 - ss(0.3, 1, p); f.drawImage(LA, -W / 2, -H / 2); f.restore();
+        f.save(); f.translate(W / 2, H / 2); f.scale(1.4 - 0.4 * e, 1.4 - 0.4 * e); f.globalAlpha = ss(0, 0.7, p); f.drawImage(LB, -W / 2, -H / 2); f.restore();
+      } else if (tr === "glitch") {
+        // 故障风：画面切成横条错位，前后两个镜头交错，带一点红蓝重影
+        const r = rng(Math.floor(t * 48)), main = p < 0.5 ? LA : LB, other = p < 0.5 ? LB : LA;
+        f.drawImage(main, 0, 0);
+        for (let i = 0; i < 16; i++) { const y = r() * H, h = 10 + r() * 90, dx = (r() - 0.5) * 160; f.drawImage(r() < 0.5 ? other : main, 0, y, W, h, dx, y, W, h); }
+        f.globalCompositeOperation = "lighter"; f.globalAlpha = 0.22;
+        f.filter = "sepia(1) hue-rotate(-50deg) saturate(6)"; f.drawImage(main, 12, 0);
+        f.filter = "sepia(1) hue-rotate(160deg) saturate(6)"; f.drawImage(main, -12, 0);
+        f.filter = "none"; f.globalCompositeOperation = "source-over";
+      } else { f.drawImage(p < 0.5 ? LA : LB, 0, 0); }
+      f.globalAlpha = 1;
+      return { tt: ttIn, shot: k, flashT: tr === "flash" ? 1 - Math.abs(2 * p - 1) : 0 };
+    }
+  }
+  let i = CUTS.length - 1; while (i > 0 && t < CUTS[i].a) i--;
+  const tt = drawShot(i, t, LA); f.drawImage(LA, 0, 0);
+  return { tt, shot: i, flashT: 0 };
+}
+
+// ---------- 后期 ----------
+// 副歌里每小节第一拍画面往前一顶；几个大节点顶得更重
+const BIG = [db(8), db(20), db(32), db(53), d0];
+const inChorus = t => (t >= S.storm[0] && t < S.dark[0] + 2) || (t >= S.beam[0] && t < S.bridge[0]) || (t >= d0 && t < S.outro[0]);
+function punch(t) {
+  let v = 0;
+  if (inChorus(t)) { let k = DB.length - 1; while (k > 0 && DB[k] > t) k--; if (DB[k] <= t) v += 0.016 * Math.exp(-(t - DB[k]) / 0.16); }
+  for (const m of BIG) if (t >= m) v += 0.05 * Math.exp(-(t - m) / 0.28);
+  return v;
+}
+const letterbox = t => 138 * ss(0.2, 1.4, t) * (1 - ss(d0 + 0.2, d0 + 3, t));
+function lensDrops(t, a) {
+  for (let i = 0; i < 40; i++) {
+    const q = rng(1200 + i), x = q() * W, y = mod(q() * H + t * (6 + q() * 26) * (q() < 0.3 ? 1 : 0.15), H + 80) - 40, r = 6 + q() * 22;
+    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
+    g.addColorStop(0, `rgba(255,255,255,${0.28 * a})`); g.addColorStop(0.7, `rgba(200,220,255,${0.06 * a})`); g.addColorStop(1, `rgba(255,255,255,${0.18 * a})`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, r, r * 1.15, 0, 0, TAU); ctx.fill();
+  }
+}
+// 调色：黄昏和黎明偏暖金，夜里和风暴偏冷青
+function grade(t) {
+  const warm = 1 - ss(db(8) - 4, db(8) + 2, t) + ss(d0 - 1, d0 + 6, t);
+  const col = mixc([40, 110, 150], [255, 160, 90], clamp(warm));
+  ctx.globalCompositeOperation = "soft-light"; ctx.fillStyle = rgb(col, 0.38); ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = "source-over";
+}
+function sweepText(text, x, y, font, spacing, t, a, b, sub) {
+  const al = win(t, a, b, 1.4);
   if (al <= 0) return;
-  ctx.save(); ctx.globalAlpha = al; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = "#fff8ee"; ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 24;
-  ctx.font = '700 110px "Noto Serif SC", serif'; ctx.letterSpacing = "26px"; ctx.fillText(title, W / 2 + 13, H * 0.36);
-  ctx.shadowBlur = 10; ctx.font = '400 26px "Noto Serif SC", serif'; ctx.letterSpacing = "4px"; ctx.fillStyle = "rgba(255,248,238,.9)";
-  ctx.fillText(sub, W / 2 + 2, H * 0.36 + 100);
+  ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = font; ctx.letterSpacing = spacing;
+  const reveal = ss(a, a + 0.7, t);
+  ctx.globalAlpha = al; ctx.filter = `blur(${(1 - reveal) * 8}px)`;
+  ctx.fillStyle = "#fff6ea"; ctx.shadowColor = "rgba(0,0,0,.5)"; ctx.shadowBlur = 24; ctx.fillText(text, x, y);
+  ctx.filter = "none"; ctx.shadowBlur = 0;
+  // 一道光从左到右扫过文字
+  const sp = clamp((t - a - 0.6) / 1.6), sx = lerp(x - 500, x + 500, sp);
+  const g = ctx.createLinearGradient(sx - 120, 0, sx + 120, 0); g.addColorStop(0, "rgba(255,230,180,0)"); g.addColorStop(0.5, `rgba(255,236,200,${0.9 * (1 - Math.abs(2 * sp - 1))})`); g.addColorStop(1, "rgba(255,230,180,0)");
+  ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = g; ctx.fillText(text, x, y); ctx.globalCompositeOperation = "source-over";
+  if (sub) { ctx.globalAlpha = al * ss(a + 0.8, a + 2, t); ctx.font = '400 24px "Noto Serif SC", serif'; ctx.letterSpacing = "4px"; ctx.fillStyle = "rgba(255,246,234,.85)"; ctx.fillText(sub, x, y + 96); }
   ctx.restore();
 }
 
 function renderAt(t) {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  const { tt, shot, flashT } = compose(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.filter = "none";
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-  let li = 0;
-  for (const [a, b, fn] of CUTS) {
-    if (t < a - FADE || t > b + FADE) continue;
-    const al = Math.min(ss(a - FADE, a + FADE, t), 1 - ss(b - FADE, b + FADE, t));
-    if (al <= 0) continue;
-    const L = layers[li++ % 2], c = L.getContext("2d");
-    c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = "source-over"; c.clearRect(0, 0, W, H);
-    fn(c, t);
-    ctx.globalAlpha = a <= 0 ? 1 : al; ctx.drawImage(L, 0, 0); ctx.globalAlpha = 1;
-  }
-  // 闪电时整个画面一白
-  const f = flash(t);
-  if (f > 0.02) { ctx.fillStyle = `rgba(235,240,255,${0.55 * f})`; ctx.fillRect(0, 0, W, H); }
-  ctx.fillStyle = VIG; ctx.fillRect(0, 0, W, H);
-  titleCard(t, 3, 12, "守灯人", "");
-  titleCard(t, S.outro[0] + 3, TL.duration - 0.6, "守灯人", "Music · Dusk Till Dawn — ZAYN ft. Sia　　Story & animation · AI 生成");
-  ctx.fillStyle = `rgba(0,0,0,${Math.max(1 - ss(0, 2.5, t), ss(TL.duration - 2.5, TL.duration, t))})`; ctx.fillRect(0, 0, W, H);
+  // 重拍冲击 + 风暴里的镜头抖动
+  const z = 1 + punch(t), shake = (t > 0.5 && t < 6.4 ? 0.4 : storm(tt)) * (2 + 9 * E(t));
+  const dx = shake * 0.5 * (Math.sin(t * 37.1) + Math.sin(t * 23.3)), dy = shake * 0.5 * (Math.sin(t * 29.7) + Math.cos(t * 41.9));
+  ctx.save(); ctx.translate(W / 2 + dx, H / 2 + dy); ctx.scale(z * 1.012, z * 1.012); ctx.drawImage(FR, -W / 2, -H / 2); ctx.restore();
+  // 闪电闪白
+  const f = shot >= 0 ? flash(tt) : 0;
+  if (f > 0.02) { ctx.fillStyle = `rgba(235,240,255,${0.5 * f})`; ctx.fillRect(0, 0, W, H); }
+  // 光晕：把亮部模糊后叠回去
+  const s = SM.getContext("2d"); s.setTransform(1, 0, 0, 1, 0, 0); s.filter = "brightness(0.9) contrast(2.2) blur(3px)"; s.clearRect(0, 0, SM.width, SM.height); s.drawImage(cv, 0, 0, SM.width, SM.height); s.filter = "none";
+  ctx.globalCompositeOperation = "screen"; ctx.globalAlpha = 0.3 + 0.4 * (flashT || 0) + 0.25 * f; ctx.drawImage(SM, 0, 0, W, H); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  grade(t);
+  if (shot >= 0 && CUTS[shot].lens) lensDrops(t, clamp(storm(tt) * 1.3));
+  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.4, W / 2, H / 2, H * 1.05); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.42)");
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  // 宽银幕黑边：晨光那一拍向外打开
+  const bar = letterbox(t); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, bar); ctx.fillRect(0, H - bar, W, bar);
+  // 文字：片头一句、片名、片尾
+  sweepText("那一夜，灯灭了。", W / 2 + 7, H / 2, '600 72px "Noto Serif SC", serif', "14px", t, 4.6, 6.4);
+  sweepText("守灯人", W / 2 + 14, H * 0.44, '700 120px "Noto Serif SC", serif', "28px", t, 7.0, db(0) + 0.4, "a story from dusk till dawn");
+  sweepText("守灯人", W / 2 + 14, H * 0.4, '700 110px "Noto Serif SC", serif', "26px", t, S.outro[0] + 3, TL.duration - 0.4, "Music · Dusk Till Dawn — ZAYN ft. Sia　　Story & animation · AI 生成");
+  ctx.fillStyle = `rgba(0,0,0,${ss(TL.duration - 2.5, TL.duration, t)})`; ctx.fillRect(0, 0, W, H);
 }
 window.renderAt = renderAt;
-window.ready = document.fonts.load('700 110px "Noto Serif SC"').then(() => document.fonts.load('26px "Noto Serif SC"')).then(() => { renderAt(0); return true; });
+window.ready = document.fonts.load('700 110px "Noto Serif SC"').then(() => document.fonts.load('500 54px "Noto Serif SC"')).then(() => document.fonts.load('24px "Noto Serif SC"')).then(() => { renderAt(0); return true; });
 </script>
 </body>
 </html>
