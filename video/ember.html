@@ -249,7 +249,7 @@ function endCard(t) {
   ctx.fillStyle = "#f4efe6"; ctx.shadowColor = "rgba(255,190,130,.5)"; ctx.shadowBlur = 26;
   ctx.font = '700 96px "Noto Serif SC", serif'; ctx.letterSpacing = "20px"; ctx.fillText("余烬与永恒", 970, 560);
   ctx.shadowBlur = 0; ctx.font = '400 24px "Noto Serif SC", serif'; ctx.letterSpacing = "4px"; ctx.fillStyle = "rgba(244,239,230,.7)";
-  ctx.fillText("音乐：乙白 · Suno.cn　　故事与配音：AI 生成", 962, 650);
+  ctx.fillText(TL.credit || "音乐：乙白 · Suno.cn　　故事与配音：AI 生成", 962, 650);
   ctx.restore();
 }
 
