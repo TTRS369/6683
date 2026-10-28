@@ -398,4 +398,228 @@ const scF = (() => {
   return { t0, t1: 185.3, back, pts, fore, cam: camM };
 })();
 
-const ALL = [scA, scB, scC, scD, scE, scF];
+// 天边泛起的晨光（画在夜空上，逐渐长高）
+function dawnBand(ctx, cam, grow, warm = 1) {
+  const [, hy] = ap(camT(cam), 0, 575), top = hy - grow * 340;
+  const g = ctx.createLinearGradient(0, hy, 0, top); g.addColorStop(0, `rgba(${warm ? "255,180,120" : "150,180,230"},${0.5 * grow})`); g.addColorStop(0.5, `rgba(${warm ? "200,120,120" : "90,120,200"},${0.22 * grow})`); g.addColorStop(1, "rgba(20,24,50,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, top, W, hy - top);
+}
+// 从手机升起的声波：一列会脉动的粒子，缓缓上升、消散（他的声音）
+function soundwave(P, ctx, c, wx, wy, t, lt, rise, power) {
+  if (rise <= 0) return; const [ox, oy] = ap(camT(c), wx, wy), r = rng(555), col = [1, 0.84, 0.56];
+  const n = Math.floor(2600 * rise);
+  for (let i = 0; i < n; i++) {
+    const a = r(), band = r(), life = r();
+    const age = (lt * 0.5 + life) % 1, up = age * (220 + power * 260) * c.s;
+    const freq = 2 + band * 9, amp = (16 + power * 40) * c.s * Math.exp(-age * 1.3) * (0.4 + 0.6 * Math.abs(Math.sin(t * freq + band * 7)));
+    const x = ox + (band - 0.5) * 2 * amp, y = oy - up - 10 * c.s;
+    P.push(x, y, col[0], col[1], col[2], (1 - age) * rise * (0.5 + 0.5 * life));
+  }
+  glow(ctx, ox, oy - 20 * c.s, (50 + power * 60) * c.s, "255,200,130", 0.3 * rise);
+}
+
+// ====================================================================
+// 镜头 G（185.3–208.6，bridge）：天快亮了。她坐在路口的台阶上，按下播放。
+// 一道由粒子组成的声波从手机里缓缓升起。全片最空、最静。
+// ====================================================================
+const scG = (() => {
+  const t0 = 185.3, PLAY = 4.0;        // 入座后按下播放
+  function cam(lt) { const g = ss(0, 23, lt); return handheld({ x: mix(900, 820, g), y: mix(640, 600, g), s: mix(0.95, 1.18, g) }, lt + t0, 0.3); }
+  function back(ctx, lt, a) {
+    const c = cam(lt); nightSky(ctx, "#0a1020", "#1c2340", 575, c);
+    dawnBand(ctx, c, ss(0, 23, lt) * 0.6, 1);
+    crossLights(ctx, c, rgb(NOW.env), 0.5); crossSignal(ctx, c, 0, 0.7);     // 还是红灯
+    ctx.globalAlpha = 1;
+  }
+  function pts(P, lt) {
+    const c = cam(lt), t = lt + t0;
+    drawCross(P, c, t, NOW, 0.9);
+    // 她坐在斑马线这头的台阶上（近景，面向路口），捧着旧手机
+    const arrive = ss(0, 1.2, lt);
+    const g = drawSide(P, "her", SIT_PHONE, 760, CROSS.near + 40, 1.15, 1, c, NOW.her, 1, t, { coat: 1, ground: false });
+    const hp = g.at(g.b.handR);
+    drawProp(P, PROP.oldPhone, c, hp[0], hp[1] - 8, 0.05, 0.6, [0.8, 0.9, 1], 0.95, t);
+    // 按下播放后，声波升起（随时间越来越强，为晨光重击蓄力）
+    const play = clamp((lt - PLAY) / 1.0), power = ss(PLAY, 23, lt);
+    soundwave(P, ctx, c, hp[0], hp[1] - 24, t, lt, play, power);
+  }
+  function fore(ctx, lt, a) {
+    const t = lt + t0;
+    motes(ctx, t, 36, "200,200,255", 0.14, 11, { vy: 2 });
+    // 雨快停了
+    if (lt < 6) rain(ctx, t, 220, "150,185,255", 0.3 * (1 - lt / 6), { wind: 0.14, speed: 1200, len: 28 });
+    vignette(ctx, 0.5); bars(ctx, 60);
+    fade(ctx, (1 - ss(0, 0.6, lt)) * 0.6);
+  }
+  return { t0, t1: 208.6, back, pts, fore, cam };
+})();
+
+// 把一个人物从某个屏幕点"聚拢成形"（声波炸成他）
+function gatherFrom(u, fx, fy) { const uu = eio(clamp(u)); return (v, ph, o) => { const p = 1 - eio(clamp((uu - 0.45 * v) / 0.55)); if (p <= 0) return; o.x = mix(o.x, fx + Math.cos(ph) * 50, p); o.y = mix(o.y, fy + Math.sin(ph) * 50, p); o.a *= (1 - p * 0.5); }; }
+
+// ====================================================================
+// 镜头 H（208.6–251.6，dawn / 最后的副歌）：晨光重击——声波炸成漫天金粒子，在马路对面拼出他。
+// 红灯变绿。接着是"如果那天"的想象：这十年他们在一起的样子，一幕接一幕快速流过。
+// 最后他走过斑马线，朝她伸出手。
+// ====================================================================
+const scH = (() => {
+  const t0 = 208.6;
+  const HIM_FAR = [1120, CROSS.far + 120, 0.64];           // 他在对面出现的位置
+  const PHONE = [760, CROSS.near + 40];                    // 她手机的大致位置
+  // "如果那天"的想象，暖金（DREAM）。每个小景一个函数，e: 0..1
+  function vRun(P, ctx, c, t, e) {                          // 跑向彼此，在路口中央相拥
+    const meet = ss(0.3, 0.8, e); const hx = mix(1120, 980, meet), herx = mix(640, 920, meet);
+    const together = ss(0.75, 1, e);
+    if (together < 1) {
+      const ph1 = (e * 3) % 1; drawSide(P, "him", run(ph1, 1 - together), hx, CROSS.near - 40, 0.72, -1, c, DREAM.him, 1, t, { coat: 0 });
+      drawSide(P, "her", run(ph1, 1 - together), herx, CROSS.near - 20, 0.74, 1, c, DREAM.her, 1, t, { coat: 1 });
+    }
+    if (together > 0) { // 相拥：两个人靠得很近，微微摇
+      const sway = Math.sin(t * 1.5) * 0.03;
+      drawFront(P, "him", fpose({ aL: [0.9, 0.5], aR: [0.9, 0.5], sway }), 965, CROSS.near + 10, 0.9, c, DREAM.him, together, t, {});
+      drawFront(P, "her", fpose({ aL: [0.8, 0.6], aR: [0.8, 0.6], sway: -sway }), 1000, CROSS.near + 6, 0.86, c, DREAM.her, together, t, { back: true });
+    }
+  }
+  function vHands(P, ctx, c, t, e) {                        // 牵手走过街道
+    const hx = mix(500, 1500, e), ph = (hx / (271 * 0.82)) % 1;
+    drawSide(P, "him", walk(ph, 0.8), hx - 55, STREET_Y, 0.82, 1, c, DREAM.him, 1, t, { coat: 0 });
+    drawSide(P, "her", walk(ph, 0.8), hx + 15, STREET_Y, 0.8, 1, c, DREAM.her, 1, t, { coat: 1 });
+    // 牵着的手之间一点光
+    const [gx, gy] = ap(camT(c), hx - 20, STREET_Y - 150); glow(ctx, gx, gy, 24 * c.s, "255,220,160", 0.5);
+  }
+  function vHome(P, ctx, c, t, e) {                         // 家里，窗边，两只杯子，两个人
+    drawRoom(P, c, t, DREAM, 0.9, { cup2: 1 });
+    const sway = Math.sin(t * 0.8) * 0.02;
+    drawSide(P, "her", lerpPose(SIT_BENCH, pose({ head: 0.1 + sway, sR: 0.3, eR: 1.3 }), 1), 1280, GROUND, 0.78, -1, c, DREAM.her, 1, t, { coat: 0 });
+    drawSide(P, "him", lerpPose(SIT_BENCH, pose({ head: -0.05, sR: 0.25, eR: 1.2 }), 1), 1380, GROUND, 0.8, -1, c, DREAM.him, 1, t, { coat: 0 });
+  }
+  function vUmb(P, ctx, c, t, e) {                          // 公交站，共撑一把伞，头靠在一起
+    drawStreet(P, c, t, DREAM, 0.8, { store: false });
+    const lean = Math.sin(t * 0.7) * 0.02;
+    drawSide(P, "him", pose({ head: 0.12 + lean, sR: 0.1, eR: 0.16 }), 2870, STREET_Y, 0.82, 1, c, DREAM.him, 1, t, { coat: 0 });
+    drawSide(P, "her", pose({ head: -0.14 + lean, sR: 0.08, eR: 0.16 }), 2912, STREET_Y, 0.8, 1, c, DREAM.her, 1, t, { coat: 1 });
+    drawProp(P, PROP.umbS, c, 2890, STREET_Y - 0.5 * 320, 0, 0.52, DREAM.hi, 0.95, t);
+  }
+  function vSit(P, ctx, c, t, e) {                          // 并肩坐着看城市
+    drawCross(P, c, t, DREAM, 0.85);
+    drawSide(P, "him", SIT_BENCH, 1460, 586 + 20, 0.72, 1, c, DREAM.him, 1, t, { ground: false });
+    drawSide(P, "her", lerpPose(SIT_BENCH, pose({ head: 0.18 }), 0.4), 1520, 586 + 20, 0.7, 1, c, DREAM.her, 1, t, { ground: false });
+  }
+  const VIG = [                                             // [时长, 画法, 相机]
+    [5.2, vRun, lt => ({ x: 980, y: 620, s: mix(0.95, 1.1, 0) })],
+    [4.6, vHands, (lt, e) => handheld({ x: mix(500, 1500, e) + 40, y: 600, s: 0.95 }, lt, 0.3)],
+    [4.6, vHome, lt => ({ x: 1330, y: 640, s: 0.92 })],
+    [4.6, vUmb, lt => ({ x: 2890, y: 600, s: 1.0 })],
+    [4.6, vSit, lt => ({ x: 1500, y: 560, s: 1.05 })],
+  ];
+  const VSTART = 5.0;                                        // 想象段从这里开始
+  function vigAt(lt) { let s = VSTART; for (let i = 0; i < VIG.length; i++) { if (lt < s + VIG[i][0]) return [i, (lt - s) / VIG[i][0], s]; s += VIG[i][0]; } return [VIG.length, 0, s]; }
+  function cam(lt) {
+    if (lt < VSTART) return { x: 960, y: 560, s: mix(1.0, 1.08, ss(0, VSTART, lt)) };
+    const [i, e] = vigAt(lt); if (i < VIG.length) return VIG[i][2](lt + t0, e);
+    return handheld({ x: mix(960, 900, ss(VSTART + 23.6, 43, lt)), y: 600, s: mix(1.0, 1.2, ss(VSTART + 23.6, 43, lt)) }, lt + t0, 0.4);
+  }
+  function back(ctx, lt, a) {
+    const c = cam(lt), warm = lt > VSTART - 0.5;
+    if (lt < VSTART || lt >= VSTART + 23.6) { nightSky(ctx, warm ? "#140e18" : "#0a1020", warm ? "#2a1a2e" : "#1c2340", 575, c); dawnBand(ctx, c, mix(0.6, 1, ss(0, 43, lt)), 1); crossLights(ctx, c, rgb(warm ? DREAM.env : NOW.env), 0.5); crossSignal(ctx, c, ss(0, 2.2, lt), 1); }
+    else { nightSky(ctx, "#1a1016", "#39212a", 640, c); dawnBand(ctx, c, 0.9, 1); }
+    ctx.globalAlpha = 1;
+  }
+  function pts(P, lt) {
+    const c = cam(lt), t = lt + t0;
+    if (lt < VSTART) {
+      // 晨光重击：声波炸开，在对面拼出他
+      drawCross(P, c, t, mix3pal(lt), 0.9);
+      const [fx, fy] = ap(camT(c), PHONE[0], PHONE[1] - 24);
+      drawSide(P, "him", pose({ head: -0.04, sR: 0.1, eR: 0.2 }), HIM_FAR[0], HIM_FAR[1], HIM_FAR[2], 1, c, DREAM.him, ss(0.4, 2.6, lt), t, { coat: 0, dim: 0.7, post: gatherFrom((lt - 0.2) / 2.2, fx, fy) });
+      // 她站起身，看过去
+      const rise = ss(2.4, 4.2, lt);
+      drawSide(P, "her", lerpPose(SIT_PHONE, pose({ head: -0.05, sR: 0.12, eR: 0.2 }), rise), 760, CROSS.near + 40, 1.15, 1, c, NOW.her, 1, t, { coat: 1, ground: false });
+      const [gx, gy] = ap(camT(c), HIM_FAR[0], HIM_FAR[1] - 60); glow(ctx, gx, gy, 90 * c.s, "255,200,140", 0.4 * ss(0.5, 2.6, lt));
+    } else if (lt < VSTART + 23.6) {
+      const [i, e] = vigAt(lt);
+      VIG[i][1](P, ctx, c, t, e);
+    } else {
+      // 他走过斑马线，朝她伸出手
+      const e = (lt - VSTART - 23.6) / (43 - VSTART - 23.6);
+      drawCross(P, c, t, DREAM, 0.9);
+      const hx = mix(1080, 980, ss(0, 0.8, e)), hy = mix(CROSS.far + 120, CROSS.near - 30, ss(0, 0.85, e)), hs = mix(0.64, 0.95, ss(0, 0.85, e));
+      const walking = e < 0.82, reach = ss(0.8, 1, e);
+      const g = drawSide(P, "him", walking ? walk((e * 4) % 1, 0.85) : pose({ head: 0.05, sR: mix(0.2, 1.5, reach), eR: mix(0.3, 0.3, reach) }), hx, hy, hs, -1, c, DREAM.him, 1, t, { coat: 0 });
+      // 她也转向他，伸手
+      drawSide(P, "her", pose({ head: -0.05, sR: mix(0.12, 1.3, reach), eR: mix(0.2, 0.35, reach) }), 800, CROSS.near + 20, 1.1, 1, c, DREAM.her, 1, t, { coat: 1, ground: false });
+      if (reach > 0) { const [gx, gy] = ap(camT(c), mix(hx, 860, 0.5), CROSS.near - 70); glow(ctx, gx, gy, 40 * c.s, "255,220,160", 0.5 * reach); }
+    }
+  }
+  function fore(ctx, lt, a) {
+    const t = lt + t0;
+    // 晨光重击的一闪
+    if (lt < 1.4) { ctx.fillStyle = `rgba(255,224,180,${0.55 * Math.exp(-lt * 3.5)})`; ctx.fillRect(0, 0, W, H); }
+    if (lt < VSTART) motes(ctx, t, 50, "255,210,150", 0.2, 13, { vy: -3 });
+    else motes(ctx, t, 44, "255,220,170", 0.16, 14, { vy: -2 });
+    // "如果那天" 字幕
+    if (lt >= VSTART - 0.3 && lt < VSTART + 4) caption(ctx, "如果那天，你没有走——", ss(VSTART, VSTART + 0.8, lt) * (1 - ss(VSTART + 3, VSTART + 4, lt)), 160);
+    vignette(ctx, 0.46); bars(ctx, 60);
+  }
+  // 重击那一下，路口从冷蓝瞬间染成暖金
+  function mix3pal(lt) { const e = ss(0, 1.2, lt); return { env: mix3(NOW.env, DREAM.env, e), hi: mix3(NOW.hi, DREAM.hi, e), her: NOW.her }; }
+  return { t0, t1: 251.6, back, pts, fore, cam };
+})();
+
+// 尾声的片名 + 署名（清晰层）
+function endCard(ctx, a, credit) {
+  if (a <= 0.003) return; ctx.save(); ctx.globalAlpha = a; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,0.5)"; ctx.shadowBlur = 20;
+  ctx.fillStyle = "rgba(245,238,228,0.96)"; ctx.font = `400 108px ${SERIF}`; ctx.letterSpacing = "26px"; ctx.fillText("迟到的消息", 960 + 13, 486);
+  ctx.font = `400 26px ${SERIF}`; ctx.letterSpacing = "12px"; ctx.fillStyle = "rgba(220,214,206,0.8)"; ctx.fillText("THE LATE MESSAGE", 960 + 6, 566);
+  if (credit > 0) { ctx.globalAlpha = a * credit; ctx.shadowBlur = 8; ctx.letterSpacing = "2px"; ctx.font = `300 20px ${UI}`; ctx.fillStyle = "rgba(210,205,200,0.7)"; ctx.fillText("AI 生成动画 · 音乐 Dusk Till Dawn — ZAYN", 960, 650); }
+  ctx.letterSpacing = "0px"; ctx.restore();
+}
+
+// ====================================================================
+// 镜头 I（251.6–266，outro）：他们的手快碰到的那一刻，他化成光点，随日出升上天空。
+// 路口只剩她一个人，绿灯亮着，她走了过去。片名浮现。
+// ====================================================================
+const scI = (() => {
+  const t0 = 251.6, DISS = 1.6, WALK0 = 6.5;
+  function cam(lt) { const g = ss(0, 14, lt); return handheld({ x: mix(900, 1000, g), y: mix(600, 560, g), s: mix(1.18, 1.0, ss(2, 8, lt)) }, lt + t0, 0.25 * (1 - ss(6, 10, lt))); }
+  function back(ctx, lt, a) {
+    const c = cam(lt); nightSky(ctx, "#1a1220", "#4a2c30", 575, c);
+    dawnBand(ctx, c, mix(0.9, 1.4, ss(0, 14, lt)), 1);
+    // 日出的光晕，越来越亮
+    const [sx, sy] = ap(camT(c), 1120, 400); glow(ctx, sx, sy, mix(120, 520, ss(0, 12, lt)) * c.s, "255,200,140", mix(0.2, 0.5, ss(1, 10, lt)));
+    crossLights(ctx, c, rgb(DREAM.env), 0.4); crossSignal(ctx, c, 1, 1);     // 绿灯
+    ctx.globalAlpha = 1;
+  }
+  function pts(P, lt) {
+    const c = cam(lt), t = lt + t0;
+    drawCross(P, c, t, DREAM, mix(0.9, 0.4, ss(8, 14, lt)));
+    // 他：伸着手，然后从指尖开始化成光点，向上随日出升走
+    const diss = clamp((lt - 0.4) / DISS);
+    if (diss < 1) drawSide(P, "him", pose({ head: 0.05, sR: 1.5, eR: 0.3 }), 980, CROSS.near - 30, 0.95, -1, c, DREAM.him, 1, t, { coat: 0, post: dissolver(diss, t, 0.15, -1.2, 420) });
+    // 升起的光点（他化成的光，飘向天空的日出）
+    if (lt > 0.4) { const r = rng(777), n = Math.floor(1400 * (1 - ss(3.5, 6, lt))); const [bx, by] = ap(camT(c), 975, CROSS.near - 150); for (let i = 0; i < n; i++) { const life = r(), age = ((lt - 0.6) * 0.33 + life) % 1; const x = bx + (r() - 0.5) * 220 * c.s + Math.sin(t * 0.8 + life * 9) * 30, y = by - age * (380 + 200 * life) * c.s; P.push(x, y, 1, 0.84, 0.56, (1 - age) * (1 - ss(4, 6, lt)) * 0.7); } }
+    // 她：先伸着手（空），然后收回，望向光，接着走过斑马线
+    if (lt < WALK0) {
+      const drop = ss(1.8, 3.2, lt);       // 收回手
+      drawSide(P, "her", pose({ head: mix(-0.05, -0.18, ss(3, 5, lt)), sR: mix(1.3, 0.14, drop), eR: mix(0.3, 0.25, drop) }), 800, CROSS.near + 20, 1.1, 1, c, DREAM.her, 1, t, { coat: 1, ground: false });
+    } else {
+      // 走过斑马线，往对面（他站过的地方），越走越远越小
+      const e = (lt - WALK0) / (14 - WALK0), hx = mix(840, 1040, e), hy = mix(CROSS.near + 20, CROSS.far + 90, ss(0, 1, e)), hs = mix(1.1, 0.6, ss(0, 1, e));
+      const ph = (e * 3.2) % 1;
+      drawSide(P, "her", walk(ph, 0.75), hx, hy, hs, -1, c, DREAM.her, 1 - ss(0.82, 1, e) * 0.3, t, { coat: 1 });
+    }
+  }
+  function fore(ctx, lt, a) {
+    const t = lt + t0;
+    if (lt < 1.2) { ctx.fillStyle = `rgba(255,228,188,${0.4 * Math.exp(-lt * 3)})`; ctx.fillRect(0, 0, W, H); }   // 化光那一下的微光
+    motes(ctx, t, 50, "255,220,170", 0.18, 17, { vy: -3 });
+    vignette(ctx, 0.44); bars(ctx, 60);
+    // 片名 + 署名，最后几秒浮现；结尾缓缓黑场
+    endCard(ctx, ss(10.5, 12.5, lt), ss(12, 13.5, lt));
+    fade(ctx, ss(14.6, 15.2, lt));
+  }
+  return { t0, t1: 266.0, back, pts, fore, cam };
+})();
+
+const ALL = [scA, scB, scC, scD, scE, scF, scG, scH, scI];
