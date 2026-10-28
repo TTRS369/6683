@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="core.js"></script><script src="rig.js"></script>
+<script>
+// 姿势检查：一排侧面动作 + 一排正/背面
+const ctx = document.getElementById("c").getContext("2d"), P = new Pts(600000);
+buildFigures();
+window.renderAt = t => {
+  P.clear(); const cam = { x: 960, y: 540, s: 1 }, cold = [0.78, 0.88, 1], gold = [1, 0.78, 0.45];
+  const row = [["her", pose({}), 1], ["her", walk(0.1), 1], ["her", walk(0.35), 1], ["him", run(0.15), 1], ["him", run(0.6), 1], ["her", SIT_KNEES, 0], ["her", SIT_PHONE, 0], ["him", SIT_BENCH, 0], ["yuan", pose({ sR: 1.3, eR: 0.2 }), 1]];
+  row.forEach(([k, p, g], i) => drawSide(P, k, p, 120 + i * 205, 470, 0.95, 1, cam, k === "him" ? gold : cold, 0.5, t, { ground: !!g, coat: g ? 1 : 0 }));
+  const fr = [["her", fpose({}), 0], ["her", fpose({}), 1], ["him", fpose({ aR: [0.25, 1.9] }), 0], ["him", fpose({ sit: 1, aL: [0.15, 0.6], aR: [0.15, 0.6] }), 0], ["him", fpose({ aR: [1.2, -0.3] }), 0], ["yuan", fpose({}), 0], ["her", fpose({ liftL: 1 }), 1]];
+  fr.forEach(([k, p, b], i) => drawFront(P, k, p, 150 + i * 260, 1040, 1.15, cam, k === "him" ? gold : cold, 0.5, t, { back: !!b }));
+  splatAll(P); ctx.fillStyle = "#03050b"; ctx.fillRect(0, 0, W, H); ctx.strokeStyle = "#223"; ctx.beginPath(); ctx.moveTo(0, 470); ctx.lineTo(W, 470); ctx.stroke(); composite(ctx);
+};
+window.ready = Promise.resolve().then(() => renderAt(0));
+</script></body></html>

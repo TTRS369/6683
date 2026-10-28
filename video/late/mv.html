@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>迟到的消息</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="core.js"></script>
+<script src="rig.js"></script>
+<script src="world.js"></script>
+<script src="hook.js"></script>
+<script src="scenes.js"></script>
+<script>
+// 导演：按时间选镜头；段落边界用粒子重组（morph）或淡入衔接
+const ctx = document.getElementById("c").getContext("2d"), P = new Pts(900000), PA = new Pts(900000), PB = new Pts(900000);
+const SCENES = (typeof ALL !== "undefined") ? ALL : [A];
+function sceneAt(gt) { for (const s of SCENES) if (gt >= s.t0 && gt < s.t1) return s; return SCENES[SCENES.length - 1]; }
+function renderAt(gt) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  // 钩子（0–14）
+  if (gt < 14) {
+    P.clear(); HOOK.bg(ctx); HOOK.under(ctx, gt, 1); HOOK.pts(P, gt); splatAll(P); composite(ctx, 0.85, 0.3); HOOK.over(ctx, gt, 1);
+    vignetteEnd(ctx, gt); return;
+  }
+  const s = sceneAt(gt), lt = gt - s.t0, MT = s.morph ? 0.9 : 0;
+  if (MT && lt < MT) {
+    const prev = SCENES[SCENES.indexOf(s) - 1], e = lt / MT;
+    PA.clear(); PB.clear(); prev.pts(PA, prev.t1 - prev.t0); s.pts(PB, 0);
+    P.clear(); morph(PA, PB, eio(e), P, s.morph);
+    ctx.fillStyle = "#01030a"; ctx.fillRect(0, 0, W, H);
+    prev.back(ctx, prev.t1 - prev.t0, 1 - e); s.back(ctx, 0, e);
+    splatAll(P); composite(ctx, 0.85, 0.3);
+    ctx.globalAlpha = 1 - e; prev.fore(ctx, prev.t1 - prev.t0, 1 - e); ctx.globalAlpha = e; s.fore(ctx, 0, e); ctx.globalAlpha = 1;
+  } else {
+    P.clear(); ctx.fillStyle = "#01030a"; ctx.fillRect(0, 0, W, H);
+    s.back(ctx, lt, 1); s.pts(P, lt); splatAll(P); composite(ctx, 0.85, 0.3); s.fore(ctx, lt, 1);
+  }
+}
+function vignetteEnd(ctx, gt) {}
+window.renderAt = renderAt;
+window.ready = document.fonts.load(`300 32px ${UI}`).then(() => document.fonts.load(`400 100px ${SERIF}`)).then(() => { buildFigures(); buildRoom(); buildStreet(); buildCross(); buildSide(); buildProps(); HOOK.build(); renderAt(0); });
+</script></body></html>
