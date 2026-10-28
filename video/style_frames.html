@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>画风样张</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+// 同一个构图（深夜的十字路口，斑马线两头各站一个人，红灯）画成四种画风，用来挑选 MV 的风格。
+// window.draw(style, t)：style 是 particles | neon | watercolor | cinema，t 是时间（秒，用来让粒子、雨有动态）
+const W = 1920, H = 1080, TAU = Math.PI * 2;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const mk = (w = W, h = H) => { const o = document.createElement("canvas"); o.width = w; o.height = h; return o; };
+function glow(c, x, y, r, col, a) { const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, `rgba(${col},${a})`); g.addColorStop(0.4, `rgba(${col},${a * 0.3})`); g.addColorStop(1, `rgba(${col},0)`); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, TAU); c.fill(); }
+
+// ---------- 共用的构图 ----------
+const CURB = 760;                                 // 远处人行道的边
+const BUILDINGS = (() => { const r = rng(7), out = []; let x = -40; while (x < W + 40) { const w = 120 + r() * 200, h = 260 + r() * 420; out.push({ x, w, h, win: r() }); x += w + 8 + r() * 30; } return out; })();
+const ZEBRA = Array.from({ length: 9 }, (_, i) => ({ y0: 800 + i * 32, h: 18 + i * 3 }));
+// 人物剪影（原创，简单的外轮廓）。him: 夹克、短发；her: 长发、长外套
+function personPath(c, x, y, s, who) {
+  c.beginPath();
+  if (who === "him") {
+    c.arc(x, y - 168 * s, 17 * s, 0, TAU);
+    c.moveTo(x - 30 * s, y - 145 * s); c.quadraticCurveTo(x, y - 158 * s, x + 30 * s, y - 145 * s);
+    c.lineTo(x + 32 * s, y - 70 * s); c.lineTo(x + 18 * s, y - 70 * s); c.lineTo(x + 17 * s, y); c.lineTo(x + 3 * s, y); c.lineTo(x, y - 62 * s);
+    c.lineTo(x - 3 * s, y); c.lineTo(x - 17 * s, y); c.lineTo(x - 18 * s, y - 70 * s); c.lineTo(x - 32 * s, y - 70 * s); c.closePath();
+  } else {
+    c.arc(x, y - 162 * s, 15 * s, 0, TAU);
+    c.moveTo(x - 16 * s, y - 170 * s); c.quadraticCurveTo(x - 24 * s, y - 120 * s, x - 18 * s, y - 100 * s); c.lineTo(x + 18 * s, y - 100 * s); c.quadraticCurveTo(x + 24 * s, y - 120 * s, x + 16 * s, y - 170 * s); c.closePath();
+    c.moveTo(x - 24 * s, y - 138 * s); c.quadraticCurveTo(x, y - 148 * s, x + 24 * s, y - 138 * s);
+    c.lineTo(x + 34 * s, y - 30 * s); c.lineTo(x + 10 * s, y - 30 * s); c.lineTo(x + 9 * s, y); c.lineTo(x - 9 * s, y); c.lineTo(x - 10 * s, y - 30 * s); c.lineTo(x - 34 * s, y - 30 * s); c.closePath();
+  }
+}
+const HIM = [520, 790, 1.05], HER = [1420, 790, 1.0], LIGHT = [300, 420];
+function trafficLight(c, fill = "#1a1a20") { c.fillStyle = fill; c.fillRect(LIGHT[0] - 5, LIGHT[1], 10, CURB + 40 - LIGHT[1]); c.fillRect(LIGHT[0] - 26, LIGHT[1] - 120, 52, 130); }
+
+// ---------- 风格一：粒子 ----------
+// 先把画面画成一张"颜色蒙版"，再按亮度撒点，每个点是一粒会微微漂动的光
+function particles(t) {
+  const m = mk(), c = m.getContext("2d");
+  c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+  for (const b of BUILDINGS) { c.fillStyle = "rgb(30,60,110)"; c.fillRect(b.x, CURB - b.h, b.w, b.h); const r = rng(Math.round(b.x)); for (let y = CURB - b.h + 20; y < CURB - 30; y += 34) for (let x = b.x + 12; x < b.x + b.w - 16; x += 26) if (r() < 0.35) { c.fillStyle = "rgb(255,200,120)"; c.fillRect(x, y, 12, 16); } }
+  c.strokeStyle = "rgb(80,150,230)"; c.lineWidth = 3; for (const b of BUILDINGS) c.strokeRect(b.x, CURB - b.h, b.w, b.h);
+  for (const z of ZEBRA) { c.fillStyle = "rgb(190,200,220)"; c.fillRect(300, z.y0, 1320, z.h * 0.5); }
+  trafficLight(c, "rgb(60,70,90)"); c.fillStyle = "rgb(255,40,40)"; c.beginPath(); c.arc(LIGHT[0], LIGHT[1] - 90, 16, 0, TAU); c.fill();
+  personPath(c, ...HIM, "him"); c.fillStyle = "rgb(255,170,90)"; c.fill();
+  personPath(c, ...HER, "her"); c.fillStyle = "rgb(255,130,170)"; c.fill();
+  const img = c.getImageData(0, 0, W, H).data;
+  ctx.fillStyle = "#020308"; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = "lighter";
+  const r = rng(11);
+  for (let i = 0; i < 260000; i++) {
+    const x = r() * W | 0, y = r() * H | 0, k = (y * W + x) * 4, R = img[k], G = img[k + 1], B = img[k + 2], lum = (R + G + B) / 765;
+    // 只有人物自己的颜色（暖橙、粉）才加密，背后的楼不受影响
+    const fig = R > 200 && G < 185 && (Math.abs(x - HIM[0]) < 50 || Math.abs(x - HER[0]) < 50) && y > HIM[1] - 200 && y < HIM[1] + 4;
+    if (lum < 0.05 || r() > lum * (fig ? 6 : 1.3)) continue;
+    const ph = r() * TAU, isHer = Math.abs(x - HER[0]) < 60 && y > HER[1] - 200 && B > 120 && R > 200;
+    // 她的右半边正在散成粒子飘走（"消失"的意象）
+    const drift = isHer && x > HER[0] - 4 && r() < 0.7 ? (r() * 260 + 30) * (0.6 + 0.4 * Math.sin(t * 0.7 + ph)) : 0;
+    const px = x + Math.sin(t * 1.3 + ph) * 1.5 + drift, py = y + Math.cos(t * 1.1 + ph) * 1.5 - drift * 0.4;
+    ctx.fillStyle = `rgba(${R},${G},${B},${(fig ? 0.9 : 0.5) * (drift > 0 ? Math.max(0.15, 1 - drift / 320) : 1)})`;
+    const sz = fig ? 2.6 : 2; ctx.fillRect(px, py, sz, sz);
+  }
+  // 空气里漂浮的光尘
+  for (let i = 0; i < 900; i++) { const x = (r() * W + t * 8) % W, y = r() * H, s = r() * 2; ctx.fillStyle = `rgba(150,190,255,${0.25 * r()})`; ctx.fillRect(x, y, s, s); }
+  glow(ctx, LIGHT[0], LIGHT[1] - 90, 120, "255,60,60", 0.5);
+  ctx.globalCompositeOperation = "source-over";
+}
+
+// ---------- 风格二：霓虹线描 ----------
+function neon(t) {
+  ctx.fillStyle = "#04030a"; ctx.fillRect(0, 0, W, H);
+  const line = (col, w, blur, f) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.shadowColor = col; ctx.shadowBlur = blur; ctx.lineJoin = "round"; f(); ctx.restore(); };
+  // 湿地面上的倒影：同样的线条上下翻转、变淡
+  for (const pass of [1, 0]) {
+    ctx.save();
+    if (pass) { ctx.translate(0, CURB * 2 + 40); ctx.scale(1, -1); ctx.globalAlpha = 0.22; }
+    line("rgba(80,220,255,.9)", 2.5, 14, () => { for (const b of BUILDINGS) { ctx.strokeRect(b.x, CURB - b.h, b.w, b.h); const r = rng(Math.round(b.x)); for (let y = CURB - b.h + 30; y < CURB - 30; y += 40) if (r() < 0.6) { ctx.beginPath(); ctx.moveTo(b.x + 14, y); ctx.lineTo(b.x + b.w - 14, y); ctx.stroke(); } } });
+    line("rgba(255,60,90,1)", 4, 26, () => { ctx.strokeRect(LIGHT[0] - 26, LIGHT[1] - 120, 52, 130); ctx.beginPath(); ctx.moveTo(LIGHT[0], LIGHT[1] + 10); ctx.lineTo(LIGHT[0], CURB + 40); ctx.stroke(); ctx.beginPath(); ctx.arc(LIGHT[0], LIGHT[1] - 90, 14, 0, TAU); ctx.stroke(); });
+    line("rgba(255,170,80,1)", 4, 24, () => { personPath(ctx, ...HIM, "him"); ctx.stroke(); });
+    line("rgba(255,110,200,1)", 4, 24, () => { personPath(ctx, ...HER, "her"); ctx.stroke(); });
+    ctx.restore();
+  }
+  line("rgba(230,235,255,.85)", 2, 10, () => { for (const z of ZEBRA) ctx.strokeRect(300, z.y0, 1320, z.h * 0.5); });
+  ctx.fillStyle = "rgba(255,60,90,1)"; ctx.beginPath(); ctx.arc(LIGHT[0], LIGHT[1] - 90, 12, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = "lighter"; glow(ctx, LIGHT[0], LIGHT[1] - 90, 220, "255,40,80", 0.35); ctx.globalCompositeOperation = "source-over";
+  // 扫描线质感
+  ctx.fillStyle = "rgba(0,0,0,.18)"; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);
+}
+
+// ---------- 风格三：水彩（适合"回忆"） ----------
+function watercolor(t) {
+  // 纸张
+  ctx.fillStyle = "#f3ead8"; ctx.fillRect(0, 0, W, H);
+  const r = rng(5);
+  for (let i = 0; i < 4000; i++) { ctx.fillStyle = `rgba(120,90,60,${0.03 * r()})`; ctx.fillRect(r() * W, r() * H, 2 + r() * 4, 2 + r() * 4); }
+  // 一层层半透明、边缘晕开的颜料
+  const wash = (col, alpha, f, blur = 6, n = 3) => { for (let k = 0; k < n; k++) { ctx.save(); ctx.filter = `blur(${blur}px)`; ctx.globalAlpha = alpha; ctx.translate((r() - 0.5) * 8, (r() - 0.5) * 8); ctx.fillStyle = col; f(); ctx.fill(); ctx.restore(); } };
+  wash("#f2b27a", 0.35, () => { ctx.beginPath(); ctx.rect(0, 0, W, 520); }, 30, 2);
+  wash("#e48a8a", 0.25, () => { ctx.beginPath(); ctx.ellipse(1300, 380, 600, 220, 0, 0, TAU); }, 60, 2);
+  for (const b of BUILDINGS) wash(["#8aa6c8", "#a7b8d0", "#9c9cc4"][Math.round(b.x) % 3], 0.32, () => { ctx.beginPath(); ctx.rect(b.x, CURB - b.h, b.w, b.h); }, 4, 2);
+  for (const b of BUILDINGS) { const rr = rng(Math.round(b.x)); for (let y = CURB - b.h + 20; y < CURB - 30; y += 34) for (let x = b.x + 12; x < b.x + b.w - 16; x += 26) if (rr() < 0.3) { ctx.fillStyle = "rgba(255,210,140,.55)"; ctx.fillRect(x, y, 12, 16); } }
+  wash("#7c8496", 0.3, () => { ctx.beginPath(); ctx.rect(0, CURB, W, H - CURB); }, 10, 2);
+  for (const z of ZEBRA) wash("#ffffff", 0.5, () => { ctx.beginPath(); ctx.rect(300, z.y0, 1320, z.h * 0.5); }, 2, 1);
+  wash("#4a4a58", 0.6, () => { ctx.beginPath(); ctx.rect(LIGHT[0] - 5, LIGHT[1], 10, CURB + 40 - LIGHT[1]); ctx.rect(LIGHT[0] - 26, LIGHT[1] - 120, 52, 130); }, 1.5, 2);
+  wash("#e0483e", 0.8, () => { ctx.beginPath(); ctx.arc(LIGHT[0], LIGHT[1] - 90, 15, 0, TAU); }, 3, 2);
+  wash("#3e5a7a", 0.7, () => personPath(ctx, ...HIM, "him"), 2, 3);
+  wash("#b0485a", 0.7, () => personPath(ctx, ...HER, "her"), 2, 3);
+  // 颜料在边缘积起来的深色线
+  ctx.strokeStyle = "rgba(60,40,40,.25)"; ctx.lineWidth = 2; personPath(ctx, ...HIM, "him"); ctx.stroke(); personPath(ctx, ...HER, "her"); ctx.stroke();
+}
+
+// ---------- 风格四：电影光影（雨夜、散景、湿地反光） ----------
+function cinema(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#05070f"); g.addColorStop(0.65, "#141a2c"); g.addColorStop(1, "#06070c");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  for (const b of BUILDINGS) { ctx.fillStyle = "#0b0e18"; ctx.fillRect(b.x, CURB - b.h, b.w, b.h); const r = rng(Math.round(b.x)); for (let y = CURB - b.h + 20; y < CURB - 30; y += 34) for (let x = b.x + 12; x < b.x + b.w - 16; x += 26) if (r() < 0.3) { ctx.fillStyle = `rgba(255,${190 + r() * 40 | 0},120,${0.4 + 0.5 * r()})`; ctx.fillRect(x, y, 12, 16); } }
+  // 湿漉漉的路面：灯光在地上拉成竖直的光带
+  ctx.fillStyle = "#07080d"; ctx.fillRect(0, CURB, W, H - CURB);
+  ctx.globalCompositeOperation = "lighter";
+  const r = rng(3);
+  for (const b of BUILDINGS) for (let k = 0; k < 2; k++) { const x = b.x + r() * b.w, gr = ctx.createLinearGradient(0, CURB, 0, H); gr.addColorStop(0, "rgba(255,200,130,.18)"); gr.addColorStop(1, "rgba(255,200,130,0)"); ctx.fillStyle = gr; ctx.fillRect(x, CURB, 6, H - CURB); }
+  const red = ctx.createLinearGradient(0, CURB, 0, H); red.addColorStop(0, "rgba(255,40,40,.5)"); red.addColorStop(1, "rgba(255,40,40,0)"); ctx.fillStyle = red; ctx.fillRect(LIGHT[0] - 30, CURB, 60, H - CURB);
+  ctx.globalCompositeOperation = "source-over";
+  for (const z of ZEBRA) { ctx.fillStyle = "rgba(200,205,220,.35)"; ctx.fillRect(300, z.y0, 1320, z.h * 0.5); }
+  trafficLight(ctx, "#020204");
+  ctx.globalCompositeOperation = "lighter"; glow(ctx, LIGHT[0], LIGHT[1] - 90, 260, "255,40,40", 0.5); ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "#ff3030"; ctx.beginPath(); ctx.arc(LIGHT[0], LIGHT[1] - 90, 13, 0, TAU); ctx.fill();
+  // 人物：黑色剪影，被红灯和远处的暖光勾出一道轮廓光
+  for (const [p, who, rim] of [[HIM, "him", "rgba(255,80,80,.9)"], [HER, "her", "rgba(255,200,150,.9)"]]) {
+    personPath(ctx, ...p, who); ctx.fillStyle = "#010103"; ctx.fill();
+    ctx.save(); ctx.strokeStyle = rim; ctx.lineWidth = 2; ctx.shadowColor = rim; ctx.shadowBlur = 12; ctx.stroke(); ctx.restore();
+  }
+  // 前景虚焦的光斑
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 26; i++) { const x = r() * W, y = r() * H * 0.9, rr = 30 + r() * 90; const col = r() < 0.5 ? "255,190,120" : r() < 0.5 ? "120,180,255" : "255,90,90"; ctx.fillStyle = `rgba(${col},${0.05 + 0.08 * r()})`; ctx.beginPath(); ctx.arc(x, y, rr, 0, TAU); ctx.fill(); ctx.strokeStyle = `rgba(${col},${0.08})`; ctx.lineWidth = 2; ctx.stroke(); }
+  ctx.globalCompositeOperation = "source-over";
+  // 雨
+  ctx.strokeStyle = "rgba(200,210,230,.28)"; ctx.lineWidth = 1.4;
+  for (let i = 0; i < 500; i++) { const x = r() * W, y = (r() * H + t * 900) % H; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 6, y + 26); ctx.stroke(); }
+  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,.6)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+}
+
+window.draw = (style, t = 0) => { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over"; ctx.filter = "none"; ({ particles, neon, watercolor, cinema })[style](t); };
+window.ready = Promise.resolve(true);
+</script>
+</body>
+</html>
