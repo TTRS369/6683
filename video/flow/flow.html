@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>流动测试</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="../late/core.js"></script>
+<script>
+// 流动测试（16 秒，一个长镜头）：真正的三维粒子空间 + 透视镜头 + 风场 + 动态模糊。
+// "他走了。"被风吹散成烟 → 化成雨 → 雨落下"画"出湿的路口 → 远处红灯 → 雨显出她的背影 → 起风，她的边缘被吹散
+// 世界坐标：y 向下为正，地面 y = 0；z 向前。画面只由时间 t 决定。
+const ctx = document.getElementById("c").getContext("2d"), P = new Pts(1200000);
+const FOC = 1250;
+const NEAR = 650, FAR = 1500, ZB = { hw: 300, z0: 690, step: 112, d: 56, n: 7 }, SIGX = -360, SIGZ = 1530, HERZ = 620;
+const sm = x => { x = clamp(x); return x * x * x * (x * (x * 6 - 15) + 10); };       // 比 smoothstep 更柔的缓动
+function kf(t, ks) { if (t <= ks[0][0]) return ks[0][1]; for (let i = 1; i < ks.length; i++) if (t < ks[i][0]) return mix(ks[i - 1][1], ks[i][1], sm((t - ks[i - 1][0]) / (ks[i][0] - ks[i - 1][0]))); return ks[ks.length - 1][1]; }
+function camAt(t) {
+  const x = kf(t, [[0, 0], [9, 40], [16, -10]]), y = kf(t, [[0, -150], [16, -140]]), z = kf(t, [[0, -200], [5, -140], [16, 200]]);
+  const p = kf(t, [[0, 0], [5.5, 0.07], [11, 0.05], [16, 0.045]]);
+  return { x, y, z, cp: Math.cos(p), sp: Math.sin(p), p };
+}
+// 世界 → 屏幕（带俯仰）。返回 null 表示在镜头后面
+let PX = 0, PY = 0, PZ = 0;
+function proj(c, x, y, z) {
+  const dx = x - c.x, dy = y - c.y, dz = z - c.z, yy = dy * c.cp - dz * c.sp, zz = dy * c.sp + dz * c.cp;
+  if (zz < 40) return false; const k = FOC / zz; PX = 960 + dx * k; PY = 540 + yy * k; PZ = zz; return true;
+}
+// 近处的点更亮（覆盖面更大），远处被雾吞掉
+const depthA = z => Math.min(1.7, Math.pow(900 / z, 0.6)) * Math.exp(-Math.max(0, z - 1600) / 2600);
+// 风场：一个流函数的旋度，处处无散度，粒子像烟一样卷而不乱
+function curl(x, y, t, o) {
+  const a1 = 0.011 * x + 0.017 * y + 0.7 * t, a2 = -0.023 * x + 0.013 * y + 1.1 * t + 2, a3 = 0.041 * x - 0.037 * y + 1.7 * t + 4;
+  o[0] = (Math.cos(a1) * 0.017 + 0.6 * Math.cos(a2) * 0.013 - 0.3 * Math.cos(a3) * 0.037) * 40;
+  o[1] = (-Math.cos(a1) * 0.011 + 0.6 * Math.cos(a2) * 0.023 - 0.3 * Math.cos(a3) * 0.041) * 40;
+}
+const CV = [0, 0];
+
+// ---------- 素材 ----------
+let NT, TX, TY, TZ, TU, NR, R0, NG, G, NB, B, NH, HM, SIG;
+const RAINBOX = { x0: -1500, x1: 1500, z0: 160, z1: 2700, top: -1150, span: 1250 };
+function build() {
+  const r = rng(91);
+  // 字："他走了。" 放在 z = 900 的平面上（1 蒙版像素 = 0.9 单位）
+  const tc = cloud(c => { c.textAlign = "center"; c.textBaseline = "middle"; c.font = `400 220px ${SERIF}`; c.fillText("他走了。", 0, 0); }, [-520, -160, 1040, 320], 0.75, 3);
+  NT = tc.n; TX = new Float32Array(NT); TY = new Float32Array(NT); TZ = new Float32Array(NT); TU = new Float32Array(NT);
+  let xmin = 1e9, xmax = -1e9; for (let i = 0; i < NT; i++) { TX[i] = tc.x[i] * 0.62; TY[i] = -150 + tc.y[i] * 0.62; TZ[i] = 900 + (r() - 0.5) * 6; xmin = Math.min(xmin, TX[i]); xmax = Math.max(xmax, TX[i]); }
+  for (let i = 0; i < NT; i++) TU[i] = (TX[i] - xmin) / (xmax - xmin);
+  // 雨（前 NT 滴由字化成）
+  NR = NT + 15000; R0 = new Float32Array(NR * 4);
+  for (let i = 0; i < NR; i++) { R0[i * 4] = mix(RAINBOX.x0, RAINBOX.x1, r()); R0[i * 4 + 1] = r() * RAINBOX.span; R0[i * 4 + 2] = mix(RAINBOX.z0, RAINBOX.z1, Math.pow(r(), 0.8)); R0[i * 4 + 3] = 1050 + r() * 450; }
+  // 地面：[x, z, 亮度, 类别(0 路面 1 斑马线 2 路沿 3 中线 4 人行道), 出现时间]
+  const g = [];
+  const add = (x, z, b, k) => { const near = z < NEAR; const tg = near ? 4.4 + r() * 1.2 : 4.7 + ((z - NEAR) / (FAR - NEAR)) * 2.6 + r() * 1.1; g.push(x, z, b, k, tg); };
+  for (let i = 0; i < 24000; i++) add(mix(-1500, 1500, r()), mix(NEAR, FAR, r()), 0.1 + r() * 0.1, 0);
+  for (let k = 0; k < ZB.n; k++) { const z0 = ZB.z0 + k * ZB.step; for (let i = 0; i < 5200; i++) add(mix(-ZB.hw, ZB.hw, r()), z0 + r() * ZB.d, 0.5, 1); }
+  for (const zc of [NEAR, FAR]) for (let i = 0; i < 7000; i++) add(mix(-1600, 1600, r()), zc + (r() - 0.5) * 7, 0.55, 2);
+  for (let x = -1600; x < 1600; x += 380) if (Math.abs(x + 95) > 360) for (let i = 0; i < 700; i++) add(x + r() * 190, (NEAR + FAR) / 2 + (r() - 0.5) * 10, 0.4, 3);
+  for (let i = 0; i < 10000; i++) { const z = mix(-120, NEAR, r()); add(mix(-1100, 1100, r()), z, ((Math.abs(z % 90) < 4) ? 0.25 : 0.07), 4); }
+  for (let i = 0; i < 5000; i++) add(mix(-1600, 1600, r()), mix(FAR, FAR + 260, r()), 0.12, 4);
+  G = new Float32Array(g); NG = g.length / 5;
+  // 远处的楼：剪影轮廓 + 亮着的窗，按楼分层（不同深度，有视差）
+  const bl = []; for (let x = -2600; x < 2600;) { const w = 160 + r() * 340; bl.push([x, 420 + r() * 900, w, 1950 + r() * 600]); x += w + 20 + r() * 60; }
+  const b = [];
+  for (const [x, h, w, z] of bl) {
+    for (let i = 0; i < (w + h) * 1.2; i++) { const e = r(); if (e < 0.34) b.push(x + r() * w, -h, z, 0.22, 0); else b.push(e < 0.67 ? x : x + w, -r() * h, z, 0.22, 0); }
+    for (let i = 0; i < w * h * 0.0035; i++) b.push(x + r() * w, -r() * h, z, 0.07, 0);            // 楼身：很淡的一层，让轮廓读起来是楼
+    for (let yy = -h + 40; yy < -60; yy += 64) for (let xx = x + 26; xx < x + w - 30; xx += 52) if (r() < 0.2) { const warm = r() < 0.18 ? 1 : 0; for (let i = 0; i < 26; i++) b.push(xx + r() * 22, yy + r() * 30, z, 0.75, warm); }
+  }
+  B = new Float32Array(b); NB = b.length / 5;
+  // 她的背影（1 蒙版像素 = 0.5 单位，脚底在原点）：齐肩短发、长大衣、手插口袋，重心落在一条腿上
+  const hc = cloud(c => {
+    c.save(); c.translate(0, 0);
+    c.beginPath(); c.moveTo(-15, 0); c.lineTo(-38, 0); c.lineTo(-36, -14); c.lineTo(-31, -122); c.lineTo(-11, -122); c.lineTo(-13, -10); c.closePath(); c.fill();   // 左腿（受力）
+    c.beginPath(); c.moveTo(8, -2); c.lineTo(30, -6); c.lineTo(30, -18); c.lineTo(25, -122); c.lineTo(6, -122); c.lineTo(7, -14); c.closePath(); c.fill();          // 右腿（放松）
+    c.beginPath(); c.moveTo(-60, -112); c.quadraticCurveTo(-66, -200, -50, -330); c.quadraticCurveTo(-58, -440, -42, -478); c.quadraticCurveTo(-4, -500, 44, -480);
+    c.quadraticCurveTo(60, -440, 52, -330); c.quadraticCurveTo(66, -210, 60, -112); c.closePath(); c.fill();                                                         // 大衣
+    c.lineWidth = 26; c.lineCap = "round"; c.beginPath(); c.moveTo(-50, -466); c.quadraticCurveTo(-76, -400, -60, -312); c.moveTo(48, -468); c.quadraticCurveTo(74, -404, 58, -316); c.stroke();   // 手臂（插口袋）
+    c.translate(2, -560); c.rotate(0.05);
+    c.beginPath(); c.ellipse(0, 0, 50, 58, 0, 0, TAU); c.fill();                                                                                                     // 头
+    c.beginPath(); c.moveTo(-54, -4); c.quadraticCurveTo(-60, 56, -44, 80); c.quadraticCurveTo(0, 92, 46, 78); c.quadraticCurveTo(60, 54, 54, -6); c.fill();          // 发尾
+    c.restore();
+  }, [-90, -630, 180, 640], 0.85, 7, 400000, 1.0);
+  NH = hc.n; HM = new Float32Array(NH * 6);
+  for (let i = 0; i < NH; i++) { const x = hc.x[i] * 0.5, y = hc.y[i] * 0.5, u = clamp((y + 312) / 312); HM[i * 6] = 150 + x; HM[i * 6 + 1] = y; HM[i * 6 + 2] = HERZ; HM[i * 6 + 3] = 8.6 + u * 2.2 + r() * 0.7; HM[i * 6 + 4] = r(); HM[i * 6 + 5] = r(); }
+  // 对面的行人灯（红色小人）和灯杆
+  const s = [];
+  for (let i = 0; i < 2600; i++) s.push(SIGX + (r() - 0.5) * 9, -r() * 300, SIGZ, 0.4, 0);
+  for (let i = 0; i < 2400; i++) { const e = r(); if (e < 0.6) s.push(SIGX + (r() - 0.5) * 60, -300 - r() * 86, SIGZ, 0.18, 0); else s.push(SIGX + (r() < 0.5 ? -30 : 30), -300 - r() * 86, SIGZ, 0.4, 0); }
+  const man = cloud(c => { c.beginPath(); c.arc(0, -28, 6, 0, TAU); c.fill(); c.fillRect(-6, -20, 12, 22); c.fillRect(-6, 2, 5, 18); c.fillRect(1, 2, 5, 18); c.fillRect(-10, -18, 4, 18); c.fillRect(6, -18, 4, 18); }, [-14, -36, 28, 58], 4, 9);
+  for (let i = 0; i < man.n; i++) s.push(SIGX + man.x[i] * 1.2, -342 + man.y[i] * 1.2, SIGZ - 2, 1.0, 1);
+  for (let i = 0; i < 2200; i++) s.push(700 + (r() - 0.5) * 8, -r() * 420, FAR + 120, 0.35, 0);
+  for (let i = 0; i < 1400; i++) s.push(700 - r() * 90, -420 + (r() - 0.5) * 10, FAR + 120, 0.5, 2);
+  SIG = new Float32Array(s);
+}
+
+// ---------- 每帧 ----------
+const SUB = [0, -1 / 360, -2 / 360];                      // 动态模糊：快门 1/120 秒内取三个时刻
+const RSUB = [0, -0.006, -0.012, -0.018];                 // 雨的快门更长，拉成细丝
+function rainPos(i, t, o) {
+  const x0 = R0[i * 4], y0 = R0[i * 4 + 1], z0 = R0[i * 4 + 2], v = R0[i * 4 + 3];
+  const ph = (y0 + v * t) % RAINBOX.span; o[0] = x0 + 130 * t; o[1] = RAINBOX.top + ph; o[2] = z0;
+  o[0] = ((o[0] - RAINBOX.x0) % (RAINBOX.x1 - RAINBOX.x0)) + RAINBOX.x0; o[3] = ph;   // ph > 1150 表示正在溅开
+}
+const RP = [0, 0, 0, 0];
+function textPos(i, t, o) {
+  const start = 2.0 + (1 - TU[i]) * 1.5 + hash(i * 1.37) * 0.45, s = t - start;
+  if (s <= 0) { o[0] = TX[i]; o[1] = TY[i] + Math.sin(t * 2 + i) * 0.3; o[2] = TZ[i]; o[3] = 0; return; }
+  curl(TX[i], TY[i], t, CV); const g = 1 - Math.exp(-s * 1.4);
+  const fx = TX[i] + 170 * s * s + CV[0] * 95 * g, fy = TY[i] - 55 * s - 18 * s * s + CV[1] * 95 * g, fz = TZ[i] + (hash(i * 3.1) - 0.5) * 260 * s;
+  const e = sm((s - 1.1) / 1.7); rainPos(i, t, RP);
+  o[0] = mix(fx, RP[0], e); o[1] = mix(fy, RP[1], e); o[2] = mix(fz, RP[2], e); o[3] = e;
+}
+const TP = [0, 0, 0, 0];
+function renderAt(t) {
+  P.clear(); const c0 = camAt(t);
+  const rainOn = ss(2.6, 6.5, t), fadeEnd = 1 - ss(15.0, 16, t);
+  // ---- 字 → 烟 → 雨 ----
+  for (let i = 0; i < NT; i++) {
+    let s0 = t - 2.0 - (1 - TU[i]) * 1.5; const moving = s0 > 0, ns = moving ? 3 : 1;
+    for (let k = 0; k < ns; k++) {
+      const tt = t + SUB[k], c = k ? camAt(tt) : c0; textPos(i, tt, TP);
+      if (TP[3] > 0.98) continue;                      // 已完全变成雨，交给雨来画
+      if (!proj(c, TP[0], TP[1], TP[2])) continue;
+      const e = TP[3], a = (1 - e) * mix(0.95, 0.5, ss(0, 1.2, s0)) * depthA(PZ) / ns;
+      P.push(PX, PY, mix(0.88, 0.62, e), mix(0.93, 0.74, e), 1, a * fadeEnd);
+    }
+  }
+  // ---- 雨 ----
+  for (let i = 0; i < NR; i++) {
+    const fromText = i < NT; let vis;
+    if (fromText) { textPos(i, t, TP); vis = TP[3]; if (vis <= 0.02) continue; }
+    else { vis = clamp((rainOn - hash(i * 0.731)) * 6); if (vis <= 0) continue; }
+    for (let k = 0; k < 4; k++) {
+      const tt = t + RSUB[k]; rainPos(i, tt, RP);
+      if (RP[3] > 1150) {                                  // 落地溅开：几颗小点向外弹
+        if (k) continue; const age = (RP[3] - 1150) / R0[i * 4 + 3];
+        for (let q = 0; q < 3; q++) { const an = q * 2.1 + i, rr = 4 + age * 220; if (proj(c0, RP[0] + Math.cos(an) * rr, -age * 60 * (1 - age * 8), RP[2] + Math.sin(an) * rr)) P.push(PX, PY, 0.7, 0.8, 1, 0.35 * (1 - age * 10) * vis * depthA(PZ) * fadeEnd); }
+        continue;
+      }
+      const c = k ? camAt(tt) : c0; if (!proj(c, RP[0], RP[1], RP[2])) continue;
+      P.push(PX, PY, 0.66, 0.78, 1, 0.42 * vis * depthA(PZ) * fadeEnd);
+    }
+  }
+  // ---- 地面：雨落下来，一点一点"画"出湿的路口 ----
+  for (let i = 0; i < NG; i++) {
+    const x = G[i * 5], z = G[i * 5 + 1], b0 = G[i * 5 + 2], kind = G[i * 5 + 3], tg = G[i * 5 + 4];
+    if (t < tg - 0.32) continue;
+    let y = 0, a = b0;
+    if (t < tg) { const u = (t - (tg - 0.32)) / 0.32; y = -320 * (1 - u * u); a = 0.35 * u; }
+    else a *= 1 + 1.6 * Math.exp(-(t - tg) * 5);
+    // 红灯在湿路面上的倒影：靠近倒影带的点被染红，微微闪动
+    const refl = Math.exp(-Math.pow((x - SIGX * ((z - camAt(t).z) / (SIGZ - camAt(t).z))) / 60, 2)) * ss(5.8, 7.2, t) * (z > NEAR && z < FAR ? 1 : 0);
+    if (!proj(c0, x, y, z)) continue;
+    const sh = refl > 0.05 ? 0.6 + 0.4 * Math.sin(t * 3.1 + x * 0.05 + z * 0.02) : 1;
+    const R = mix(kind === 1 ? 0.78 : 0.42, 1, refl), Gc = mix(kind === 1 ? 0.84 : 0.52, 0.22, refl), Bc = mix(1, 0.2, refl);
+    P.push(PX, PY, R, Gc, Bc, (a + refl * 0.5) * sh * depthA(PZ) * fadeEnd);
+  }
+  // ---- 远处的楼：从雾里慢慢浮出来 ----
+  const bOn = ss(5.4, 9, t) * fadeEnd;
+  if (bOn > 0) for (let i = 0; i < NB; i++) {
+    if (!proj(c0, B[i * 5], B[i * 5 + 1], B[i * 5 + 2])) continue;
+    const warm = B[i * 5 + 4], tw = 0.8 + 0.2 * Math.sin(t * 0.9 + i);
+    P.push(PX, PY, warm ? 1 : 0.5, warm ? 0.8 : 0.6, warm ? 0.55 : 0.95, B[i * 5 + 3] * bOn * tw * 1.1);
+  }
+  // ---- 红灯、灯杆、路灯 ----
+  const sOn = ss(5.6, 7.0, t) * fadeEnd, breathe = 0.85 + 0.15 * Math.sin(t * 2.2);
+  for (let i = 0; i < SIG.length / 5; i++) {
+    const k = SIG[i * 5 + 4]; if (!proj(c0, SIG[i * 5], SIG[i * 5 + 1], SIG[i * 5 + 2])) continue;
+    if (k === 1) P.push(PX, PY, 1, 0.24, 0.18, SIG[i * 5 + 3] * sOn * breathe * 1.4);
+    else P.push(PX, PY, k === 2 ? 0.95 : 0.45, k === 2 ? 0.95 : 0.55, 1, SIG[i * 5 + 3] * sOn * 0.8);
+  }
+  // ---- 她：雨从头到脚打在她身上，显出背影；有呼吸；最后起风，边缘被吹散 ----
+  for (let i = 0; i < NH; i++) {
+    const tr = HM[i * 6 + 3], h1 = HM[i * 6 + 4], h2 = HM[i * 6 + 5];
+    if (t < tr - 0.36) continue;
+    const peel = h1 < 0.42 ? t - (12.3 + (1 - clamp((HM[i * 6] - 118) / 64)) * 2.2 + h2 * 0.8) : -1;
+    const moving = t < tr || peel > 0, ns = moving ? 3 : 1;
+    for (let k = 0; k < ns; k++) {
+      const tt = t + SUB[k], c = k ? camAt(tt) : c0;
+      let x = HM[i * 6], y = HM[i * 6 + 1], z = HM[i * 6 + 2], a = 0.3;
+      if (tt < tr) { const u = clamp((tt - (tr - 0.36)) / 0.36); y -= 380 * (1 - u * u); a = 0.3 * u; }
+      else {
+        a *= 1 + 1.8 * Math.exp(-(tt - tr) * 5);
+        if (y < -90) y *= 1 + 0.005 * Math.sin(tt * 1.35);                       // 呼吸：肩膀微微起伏
+        if (h2 < 0.18) y += Math.min(10, (tt - tr) * 2.5);                        // 雨水顺着大衣往下淌
+        const pe = h1 < 0.42 ? tt - (12.3 + (1 - clamp((HM[i * 6] - 118) / 64)) * 2.2 + h2 * 0.8) : -1;
+        if (pe > 0) { curl(x, y, tt, CV); const g = 1 - Math.exp(-pe * 1.3); x += 150 * pe * pe + CV[0] * 60 * g; y += -30 * pe + CV[1] * 60 * g; z += (h2 - 0.5) * 120 * pe; a *= Math.max(0, 1 - pe / 2.2); }
+      }
+      if (!proj(c, x, y, z)) continue;
+      P.push(PX, PY, 0.8, 0.88, 1, a * depthA(PZ) / ns * fadeEnd);
+    }
+  }
+  splatAll(P);
+
+  // ---- 背景：深夜的天，城市在地平线附近的微光 ----
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  const hy = 540 - FOC * Math.tan(c0.p), bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, "#020309"); bg.addColorStop(clamp(hy / H - 0.08), "#060a18"); bg.addColorStop(clamp(hy / H + 0.02), "#0b1226"); bg.addColorStop(1, "#03050c");
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+  const cityGlow = ss(5.4, 9, t) * fadeEnd; if (cityGlow > 0) { const g2 = ctx.createLinearGradient(0, hy - 260, 0, hy + 40); g2.addColorStop(0, "rgba(40,60,120,0)"); g2.addColorStop(1, `rgba(60,80,150,${0.22 * cityGlow})`); ctx.fillStyle = g2; ctx.fillRect(0, hy - 260, W, 300); }
+  // 红灯的光晕和路面上长长的倒影（湿地面）
+  ctx.globalCompositeOperation = "lighter";
+  if (sOn > 0 && proj(c0, SIGX, -342, SIGZ)) {
+    const sx = PX, sy = PY; glow(ctx, sx, sy, 90, "255,60,50", 0.55 * sOn * breathe); glow(ctx, sx, sy, 260, "255,40,40", 0.12 * sOn);
+    if (proj(c0, SIGX, 0, FAR - 10)) { const gx = PX, gy = PY; proj(c0, SIGX * 0.55, 0, NEAR + 20); const nx = PX, ny = PY;
+      const rg = ctx.createLinearGradient(0, gy, 0, ny); rg.addColorStop(0, `rgba(255,60,50,${0.3 * sOn})`); rg.addColorStop(1, "rgba(255,60,50,0)");
+      ctx.fillStyle = rg; ctx.beginPath(); ctx.moveTo(gx - 10, gy); ctx.lineTo(gx + 10, gy); ctx.lineTo(nx + 46, ny); ctx.lineTo(nx - 46, ny); ctx.fill(); }
+  }
+  if (sOn > 0 && proj(c0, 620, -418, FAR + 120)) glow(ctx, PX, PY, 120, "200,215,255", 0.35 * sOn);
+  // 远处虚焦的光斑（焦点在她身上，远处的灯化成圆斑）
+  if (bOn > 0) for (let i = 0; i < 30; i++) { const j = Math.floor(hash(i * 9.1) * NB); if (B[j * 5 + 3] < 0.7) continue; if (!proj(c0, B[j * 5], B[j * 5 + 1], B[j * 5 + 2])) continue; glow(ctx, PX, PY, 14 + hash(i) * 20, B[j * 5 + 4] ? "255,200,140" : "170,190,255", 0.09 * bOn); }
+  ctx.globalCompositeOperation = "source-over";
+  // 清晰的字底（风起之前），保证开头的字锐利
+  const crisp = 1 - ss(1.9, 2.6, t); if (crisp > 0 && proj(c0, 0, -150, 900)) { ctx.save(); ctx.globalAlpha = 0.5 * crisp * ss(0, 0.8, t); ctx.fillStyle = "rgb(225,235,255)"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `400 ${220 * 0.62 * FOC / PZ}px ${SERIF}`; ctx.fillText("他走了。", PX, PY); ctx.restore(); }
+  composite(ctx, 0.9, 0.4);
+  // 暗角、遮幅、开头和结尾的黑
+  const v = ctx.createRadialGradient(960, 560, 480, 960, 560, 1250); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,0.5)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, 64); ctx.fillRect(0, H - 64, W, 64);
+  const blk = 1 - ss(0, 0.8, t); if (blk > 0) { ctx.fillStyle = `rgba(0,0,0,${blk})`; ctx.fillRect(0, 0, W, H); }
+}
+window.renderAt = renderAt;
+window.ready = document.fonts.load(`400 100px ${SERIF}`).then(() => { build(); renderAt(0); });
+</script></body></html>

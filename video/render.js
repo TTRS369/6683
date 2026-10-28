@@ -2,7 +2,7 @@
 const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 // 用法：node render.js <页面.html> <输出.mp4> [时间轴.json]
-const FPS = 24, WORKERS = 4;
+const FPS = +(process.env.FPS || 24), WORKERS = +(process.env.WORKERS || 4);
 const path = require('path'), fs = require('fs');
 const PAGE = path.resolve(process.argv[2] || path.join(__dirname, 'eternity.html'));
 const OUT = path.resolve(process.argv[3] || PAGE.replace(/\.html$/, '.mp4'));
@@ -23,7 +23,7 @@ const SEG = fs.mkdtempSync(path.join(require('os').tmpdir(), 'eternity-'));
     const done = new Promise(r => ff.on('close', r));
     const end = Math.min(TOTAL, (w + 1) * chunk);
     for (let f = w * chunk; f < end; f++) {
-      const url = await p.evaluate(f => { renderAt(f / 24); return document.getElementById('c').toDataURL('image/jpeg', 0.94); }, f);
+      const url = await p.evaluate(([f, fps]) => { renderAt(f / fps); return document.getElementById('c').toDataURL('image/jpeg', 0.94); }, [f, FPS]);
       if (!ff.stdin.write(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64'))) await new Promise(r => ff.stdin.once('drain', r));
       if (w === 0 && f % 120 === 0) console.log(`worker0 ${f - w * chunk}/${end - w * chunk} ${((Date.now() - t0) / 1000).toFixed(0)}s`);
     }
