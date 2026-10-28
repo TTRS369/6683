@@ -231,4 +231,79 @@ const scD = (() => {
   return { t0, t1: 104.0, back, pts, fore, cam };
 })();
 
-const ALL = [scA, scB, scC, scD];
+// 旧手机屏幕上那条未发送的语音（画得清晰，可读）
+function drawVoiceMsg(ctx, cx, cy, s, reveal, play) {
+  if (reveal <= 0) return; ctx.save(); ctx.globalAlpha = reveal; ctx.translate(cx, cy); ctx.scale(s, s);
+  ctx.fillStyle = "rgba(60,90,160,0.5)"; rrect(ctx, -92, -30, 184, 60, 16); ctx.fill();
+  ctx.strokeStyle = "rgba(170,200,255,0.5)"; ctx.lineWidth = 1.2; ctx.stroke();
+  // 波形条
+  const bars = 26, r = rng(91); ctx.fillStyle = "rgba(210,228,255,0.95)";
+  for (let i = 0; i < bars; i++) { const h = (6 + 26 * Math.abs(Math.sin(i * 1.3) * (0.5 + r()))) * (play > 0 ? (i / bars < play ? 1 : 0.4) : 1); ctx.fillRect(-66 + i * 5.1, -h / 2, 2.6, h); }
+  ctx.beginPath(); ctx.moveTo(-84, -8); ctx.lineTo(-84, 8); ctx.lineTo(-72, 0); ctx.fill();     // 播放三角
+  ctx.textAlign = "center"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = "rgba(255,170,150,0.9)";
+  ctx.font = `500 15px ${UI}`; ctx.fillText("未发送", 0, 52); ctx.fillStyle = "rgba(190,210,255,0.7)"; ctx.font = `300 13px ${UI}`; ctx.fillText("那天晚上 23:47 · 0:14", 0, 72);
+  ctx.restore();
+}
+
+// ====================================================================
+// 镜头 E（104–153，climb / 主歌 2）：她见到他的朋友，接过一个旧盒子，
+// 里面是他的旧手机，上面有一条十年前那晚他录好却没发出的语音。
+// ====================================================================
+const scE = (() => {
+  const t0 = 104.0;
+  // 用路口的侧面视角（人行道），和上一个镜头同一个地方
+  function pts(P, lt) {
+    const t = lt + t0;
+    if (lt < 22) {                                          // 104–126：朋友走来，递盒子；她接过，蹲下打开
+      const push = ss(9, 22, lt);                           // 后半缓缓推近
+      const c = handheld({ x: mix(1000, 1080, push), y: mix(600, 660, push), s: mix(0.95, 1.4, push) }, t, 0.4);
+      nightSky(ctx, "#05070f", "#0c1226", 640, c); drawSideSet(P, c, t, NOW, 0.85, {}); sideLights(ctx, c, rgb(NOW.env), 0.9, 0);
+      crossSignalSide(ctx, c, 0);
+      // 朋友（灰蓝）从左走进来，停下，伸手递出盒子
+      const fx = keys(lt, [[0, 440], [5, 820], [7, 860]]), reach = ss(7, 9.5, lt) * (1 - ss(10.5, 12, lt));
+      const fWalk = lt < 6 ? walk((fx / (271 * 0.9)) % 1, 0.9) : pose({ head: 0.12, sR: mix(0.1, 1.35, reach), eR: mix(0.2, 0.35, reach) });
+      const fAlive = 1 - ss(20, 22, lt);                     // 最后淡出（朋友离开）
+      drawSide(P, "yuan", fWalk, fx, STREET_Y, 0.9, 1, c, PAL.yuan, 0.85 * fAlive, t, { coat: 0, dim: 0.7 });
+      // 她（右，面向朋友），伸手接过 → 低头开盒
+      const open = ss(13, 20, lt), take = ss(9, 12, lt);
+      const herPose = lt < 13.5 ? pose({ head: 0.22, sR: mix(0.2, 1.3, take), eR: mix(1.0, 0.4, take) }) : lerpPose(pose({ head: 0.3, sR: 0.6, eR: 1.2 }), SIT_KNEES, ss(13.5, 17, lt) * 0.55);
+      drawSide(P, "her", herPose, 1200, STREET_Y, 0.9, -1, c, NOW.her, 1, t, { coat: 1 });
+      // 盒子：朋友手上 → 递到她手里（固定在手的高度），她接过后下沉到膝前
+      const hand = clamp((lt - 8) / 4), low = ss(13.5, 18, lt);
+      const bx = mix(930, 1120, hand), by = mix(700, 715, hand) + low * 70;
+      if (open < 1) drawProp(P, PROP.box, c, bx, by, 0, 0.72, [0.72, 0.82, 1], 0.9, t);
+      // 盒盖打开后掀起、化光
+      if (open > 0) { const u = open; drawProp(P, PROP.lid, c, bx, by - 50 - u * 90, u * 0.3, 0.72, [0.78, 0.88, 1], 0.9 * (1 - u), t, { post: dissolver(u, t, 0.2, -1, 160) });
+        const [gx, gy] = ap(camT(c), bx, by - 8); glow(ctx, gx, gy, 60 * c.s * open, "150,190,255", 0.4 * open); }
+    } else {                                                 // 126–153：她坐着捧旧手机，那条未发送的语音浮在屏幕上
+      const c = { x: 1150, y: 640, s: mix(1.1, 1.32, ss(22, 46, lt)) };
+      nightSky(ctx, "#060910", "#0e1430", 700, c); drawSideSet(P, c, t, NOW, 0.5); sideLights(ctx, c, rgb(NOW.env), 0.55, 0);
+      // 她抱膝、双手捧着旧手机在胸前，低头看
+      const hg = drawSide(P, "her", SIT_PHONE, 1240, STREET_Y, 0.95, -1, c, NOW.her, 1, t, { coat: 1 });
+      const hp = hg.at(hg.b.handR);                          // 手的世界坐标
+      drawProp(P, PROP.oldPhone, c, hp[0], hp[1] - 8, -0.12, 0.52, [0.72, 0.85, 1], 0.95, t);
+      const scr = ap(camT(c), hp[0], hp[1] - 14); glow(ctx, scr[0], scr[1], 60 * c.s, "150,190,255", 0.42);
+      // 语音框浮在手机上方偏左的空处，清晰可读
+      scE_scr = { x: scr[0] - 150 * c.s, y: scr[1] - 150 * c.s, s: c.s, from: [scr[0], scr[1]] };
+    }
+  }
+  function back(ctx, lt, a) {}
+  function fore(ctx, lt, a) {
+    const t = lt + t0;
+    rain(ctx, t, 300, "150,185,255", 0.4 * (1 - ss(0, 6, lt) * 0.5), { wind: 0.16, speed: 1300, len: 30 });
+    motes(ctx, t, 30, "150,185,255", 0.12, 9);
+    // 旧手机特写时，在屏幕位置叠一条清晰的语音消息
+    if (lt >= 126 - t0 && scE_scr) {
+      const rev = ss(129 - t0, 131.5 - t0, lt);
+      if (rev > 0) { ctx.save(); ctx.globalAlpha = rev * 0.5; ctx.strokeStyle = "rgba(150,190,255,1)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(scE_scr.from[0], scE_scr.from[1]); ctx.lineTo(scE_scr.x, scE_scr.y + 30 * scE_scr.s); ctx.stroke(); ctx.restore(); }
+      drawVoiceMsg(ctx, scE_scr.x, scE_scr.y, scE_scr.s * 0.95, rev, 0);
+    }
+    vignette(ctx, 0.5); bars(ctx, 60);
+    fade(ctx, (1 - ss(0, 0.6, lt)) * 0.7);
+  }
+  return { t0, t1: 153.0, back, pts, fore, cam: lt => ({ x: 1080, y: 640, s: 1.2 }) };
+})();
+function crossSignalSide(ctx, c, green) { const [rx, ry] = ap(camT(c), 1500, 352); glow(ctx, rx, ry, 56 * c.s, green ? "80,255,170" : "255,70,60", 0.6); }
+let scE_scr = null;
+
+const ALL = [scA, scB, scC, scD, scE];
