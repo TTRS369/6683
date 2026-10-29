@@ -2,94 +2,65 @@
 
 新开一个 Claude Code 会话（同一个仓库 `TTRS369/6683`、分支 `claude/fun-ideas-qw48b4`），第一句话发：
 
-> 读一下 video/HANDOFF.md，接着做《迟到的消息》MV
+> 读一下 video/HANDOFF.md，接着做《迟到的消息》
 
-## 正在做：《迟到的消息》粒子 MV（配《Dusk Till Dawn》的结构）
+## 正在做：《迟到的消息》第三版（`video/flow/film.html`）
 
-**已确定：**
-- 画风：**粒子特效**（参考 `style_frames.html` 里的 `particles(t)`：先画一张色块遮罩，再按颜色撒约 26 万个光点，人物能散成粒子）。
-- 故事：方向二《迟到的消息》（她收到"他走了"的消息 → 走过回忆 → 发现他十年来每年都回路口等她 → 声波炸成他 → 想象中的十年 → 他化成光升空 → 绿灯，她走过去）。
-- 画质：要清晰，不加颗粒噪点。
+### 用户定下的方向（最重要）
+- **不讲故事，围绕一个主题**。开头那条手机消息"他走了"就够了，之后只靠画面和音乐，答案留给观众：有人看到失恋，有人看到遗憾、后悔、释怀，不刻意强调。
+- **不要用"MV"去定义它**；人物不要多，不要让人物去"演剧情"。
+- 画面：有的地方可以一片空白，有的地方可以绚丽多彩，但**必须有质感**；要**清晰**，不要噪点。
+- **要流畅**：60 帧 + 动态模糊，一个长镜头，粒子像风里的烟一样流动。
+- 开头用手机消息的版本，**"他走了"不带句号**。
+- 第二版（`video/late/`，火柴人演剧情）用户打了 3 分：动作僵硬、坐姿 bug、蹲下变白块、看不懂要表达什么。不要回到那个路子。
+- 代码画的圆头小人用户觉得太卡通、没感觉，不用。
 
-**音乐：** 用用户给的《Dusk Till Dawn》（ZAYN）。音频不进仓库，在
-`/root/.claude/uploads/.../4e29a766-Dusk_Till_Dawn-ZAYN.mp3`；新窗口里用户要**重新上传**。
-公开发布有版权风险，已在片尾署名"AI 生成动画 · 音乐 Dusk Till Dawn — ZAYN"。
+### 现在的结构（约 3 分钟，用户说"你自己安排就行"）
+| 时间 | 画面 |
+|---|---|
+| 0–7.7 | 手机消息（`late/hook.js`）：粒子拼出手机 → 阿远发来"他走了" → 推近 → 只剩三个大字 |
+| 7.7–32.6 | 8.29 秒起音处字被风吹成烟 → 化成雨 → 雨"画"出湿的路口、红灯和倒影 → 雨显出她的背影 |
+| 32.6–64.6 | 低音进：她不动，镜头绕着她转；车灯流成光河；楼里的窗灯一盏盏亮又灭 |
+| 64.6–99.3 | 副歌：四季绕着她旋转（樱花 / 暴雨+闪电 / 落叶 / 雪）；96.7 一阵风把她吹散一部分 |
+| 99.3–101.4 | 全黑，只剩红灯和倒影 |
+| 101.4–122.5 | 桥段（留白）：雪地、一盏路灯、一串往远处走的脚印走到一半断了，雪慢慢把脚印填平，最后一个脚印升起一点金光，镜头跟着抬头 |
+| 122.5–166.4 | 白金色一闪，天亮，红灯变绿；从她身后低角度仰拍天空，整座城化成光往上升，镜头慢慢升高拉远 |
+| 166.4–179.9 | 她慢慢淡去，路口空了，绿灯亮着；片名"迟到的消息"+ 署名 |
 
-**进度：全片九个镜头都做完了。** 代码在 `video/late/`：
-- `core.js` 粒子引擎（点云取样、仿射、morph 转场、合成+辉光）
-- `rig.js` 人物骨架 + 动作（走/跑/坐/抱膝）；`buildFigures()`
-- `world.js` 场景（房间/街道/路口透视/路口侧面）、道具、雨、季节光尘
-- `hook.js` 开头钩子（0–14 秒，原 `late.html` 移植过来）
-- `scenes.js` 九个镜头 scA–scI + 导演用的 `ALL`
-- `mv.html` 主页面（按时间选镜头，段落边界 morph/淡入）
+### 音乐：剪辑版 Dusk Till Dawn（约 3 分钟）
+- 原曲 0–96.71 秒接 182.71 秒到结尾（副歌 1 结尾接副歌 2 最后一小节，和声相似度 0.992；按起音包络对齐后后半段再挪 93 毫秒；60 毫秒等功率交叉淡化）。
+- 剪辑版在 `scratchpad/film/song_edit.wav`（不进仓库）。原曲在 uploads 里，新窗口要用户**重新上传**。
+- 剪辑版的段落/节拍：`video/flow/film.timeline.json`。
 
-镜头：scA 公寓(14–32.4)、scB 夜街+回忆(32.4–64.9，morph 进入)、scC 争吵(64.9–96.7)、
-scD 路口静止(96.7–104)、scE 盒子+语音(104–153)、scF 十年等待(153–185.3)、
-scG 桥段播放(185.3–208.6)、scH 晨光重击+想象的十年(208.6–251.6)、scI 尾声(251.6–266)。
+### 代码
+- `video/flow/film.html` 全片。三维粒子空间：`proj()` 带偏航和俯仰；镜头 `camAt(E)` 用样条（`trk`），速度连续。
+- 用到 `video/late/core.js`（点缓冲、取样、合成+辉光）和 `video/late/hook.js`（开头手机消息）。
+- 小点（`P.push`）画雨丝、轮廓、地面；有形状的东西（花瓣、落叶、雪、车灯、升起的光）用柔光贴图（`wspr` / `spr`），按远近缩放、按运动方向拉长。
+- `video/flow/flow.html` 是之前的 22 秒流动测试。
+- 渲染：`FPS=60 CRF=18 node video/render.js video/flow/film.html film_master.mp4 film.timeline.json`（约 20 分钟），再配音乐、压到 400MB 以内发给用户。
 
-**渲染全片：**
-```
-cd video/late && echo '{"duration":266,"fps":24}' > mv.timeline.json
-CRF=16 node ../render.js mv.html mv_silent.mp4 mv.timeline.json
-ffmpeg -y -i mv_silent.mp4 -i <歌.mp3> -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -shortest 迟到的消息.mp4
-```
-单帧检查：`node /tmp/.../late/still.js mv.html <输出目录> t1 t2 ...`（still.js 在 scratchpad/late）。
+### 下一步
+等用户看完全片的反馈。
 
-**下一步：** 等用户看完全片反馈，按需要微调某个镜头（改 scenes.js 对应的 scX，重渲染即可）。
-
-### 视觉规则
-- 现在（她，十年后的这一夜）：冷蓝白粒子
-- 过去（回忆里的他、他们）：暖金色粒子
-- 招牌转场：上一个画面的粒子飞起，重新拼成下一个画面
-
-### 分镜表（时间按 Dusk Till Dawn 的段落；换歌要重新对齐）
-
-| 时间 | 段落 | 画面 |
-|---|---|---|
-| 0:00–0:11 | 钩子 | 黑屏，粒子手机屏幕亮起，消息"他走了。"文字碎成粒子，拼成片名《迟到的消息》 |
-| 0:11–0:32 | 主歌 1 | 黄昏公寓，她坐窗边握着手机；门口闪过金色人影（回忆里他回家），一眨眼散了 |
-| 0:32 | 低音进 | 她抓起外套冲出门，房间粒子整个飞散，重组成夜晚街道 |
-| 0:32–1:04 | 夜 | 她走过城市，每处浮现金色回忆：便利店挑冰淇淋、公交站共撑一把伞，出现即消散 |
-| 1:04–1:36 | 副歌 1 | 十年前的争吵，金红粒子快切：对峙、钥匙摔地溅成粒子、门重重关上、画面碎掉；穿插现在的她雨中奔跑 |
-| 1:36 | 收 | 她停在路口，红灯；所有粒子和雨悬停，时间静止 |
-| 1:42–2:33 | 主歌 2 | 见到他的朋友，接过旧盒子，里面是他的旧手机，有一条十年前那晚录好没发出的语音 |
-| 2:33–3:05 | 副歌 2（反转） | 蒙太奇：十年里每年同一天他都回这个路口等她，四季交替（雪/花瓣/落叶粒子），字幕"第 1 年…第 10 年"；同时她拿着手机跑向路口 |
-| 3:05–3:28 | 桥段 | 天快亮，她坐在路口台阶按下播放，一道粒子声波缓缓升起 |
-| 3:28 | 晨光重击 | 声波炸成漫天金粒子，在马路对面拼出他；红灯变绿 |
-| 3:28–4:11 | 最后副歌 | "如果那天"的想象：和好、牵手走过街道、日常，一幕接一幕，十年在四十秒里过完；他走过斑马线向她伸手 |
-| 4:11–4:26 | 尾声 | 快碰到时他化成光点随日出升空；路口只剩她，绿灯亮着，她走过去；片名 |
-
-《Dusk Till Dawn》的段落时间（之前分析得到，`lh_timeline.py` 里的 marks）：
-低音进 32.4s，副歌 1 64.9s，收 96.7s，再起 104.0s，副歌 2 153.0s，桥段 185.3s，晨光重击 208.6s，尾声 251.6s。
-
-## 制作流程（所有视频都这样做）
-
-1. **分析音乐**：`python video/tools/bands.py song.mp3`（分频段能量看乐器进出）、`video/tools/edges.py`（找段落边界）、`video/lh_timeline.py song.mp3 out.timeline.json`（段落 + 逐帧能量 + 节拍/小节）。
-2. **写画面**：一个 HTML，暴露 `window.renderAt(t)`，画面只由时间 t 决定；读取 `window.TIMELINE`（sections / energy / bass / beats / downbeats / lyrics）。
-3. **渲染**：`node video/render.js page.html out_silent.mp4 page.timeline.json`（4 个 Chromium 并行出帧 + ffmpeg 编码；`CRF=16` 更清晰）。
-4. **合成音频**：`ffmpeg -i out_silent.mp4 -i song.mp3 -c:v copy -c:a aac -b:a 256k -shortest out.mp4`。
-5. 聊天里上传单个文件上限 400MB，超了就分段。
-
-其他工具（`video/tools/`）：
-- `transcribe.py` / `align.py`：faster-whisper 识别人声时间，和歌词对齐出逐句时间轴（PyAV 有兼容问题，脚本里用 ffmpeg 解码）。
-- `tts.py` / `tts_batch.py` / `tts_score.py`：Kokoro 离线配音（sherpa-onnx，模型 `csukuangfj/kokoro-multi-lang-v1_1`，放在 `KOKORO_DIR`；之前用的男声 sid 70、语速 1.08）。
-- `room_sfx.py`（在 video/ 下）：用代码合成音效，人声出现时自动压低。
+## 制作流程（通用）
+1. 分析音乐：`video/tools/bands.py`、`edges.py`、`video/lh_timeline.py`。
+2. 写画面：HTML 暴露 `window.renderAt(t)`，画面只由时间决定。
+3. 渲染：`node video/render.js page.html out.mp4 timeline.json`（`FPS`、`CRF`、`PRESET` 环境变量）。
+4. 配音乐：`ffmpeg -i out.mp4 -i song -map 0:v -map 1:a -c:v copy -c:a aac -b:a 256k -shortest final.mp4`。
+5. 聊天里上传单个文件上限 400MB。
 
 ## 已完成的作品
-
 | 文件 | 内容 |
 |---|---|
-| `eternity.html` | 永恒/死亡/进化短片（116 秒） |
-| `shixing.html` | 《拾星》MV（机器人阿锈） |
+| `eternity.html` | 永恒/死亡/进化短片 |
+| `shixing.html` | 《拾星》MV |
 | `chixie.html` | 《迟写的章节》MV（歌词时间轴不进仓库） |
-| `room.html` + `room_sfx.py` | 《A Little Room for You》故事 MV + 合成音效 |
-| `ember.html` + `ember_audio.py` | 《余烬与永恒》解说版；`ember_text.timeline.json` 是只有字幕的版本 |
-| `lighthouse.html` | 《守灯人》Dusk Till Dawn MV 第一版（用户觉得画面重复、故事不清楚，所以重做） |
-| `style_frames.html` | 四种画风样张：粒子 / 霓虹线条 / 水彩 / 电影感 |
-| `chibi_frames.html` | 圆头小人画风样张（用户最后没选） |
-
-成品 mp4、音频都不进仓库（`.gitignore`），在聊天记录里下载，Google 云盘里也有素材文件夹和歌词文档。
+| `room.html` + `room_sfx.py` | 《A Little Room for You》故事 MV |
+| `ember.html` + `ember_audio.py` | 《余烬与永恒》解说版 / 字幕版 |
+| `lighthouse.html` | 《守灯人》（第一版 Dusk Till Dawn MV，用户觉得画面重复、看不懂） |
+| `late/` | 《迟到的消息》第二版（火柴人演剧情，3 分） |
+| `flow/` | 《迟到的消息》第三版（现在这版） |
 
 ## 注意事项
-- 公开发布：标注 AI 生成；用别人的歌（如 Dusk Till Dawn）有版权风险，原创 Suno 歌更安全。
-- 片尾保留制作署名（注明 AI 和音乐来源）。
+- 公开发布要标注 AI 生成；Dusk Till Dawn 有版权风险，原创 Suno 歌更安全。
+- 片尾保留署名（AI + 音乐来源）。
