@@ -3,9 +3,10 @@
 <style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
 <body><canvas id="c" width="1920" height="1080"></canvas>
 <script src="../late/core.js"></script>
+<script src="../late/hook.js"></script>
 <script>
 // 流动测试（16 秒，一个长镜头）：真正的三维粒子空间 + 透视镜头 + 风场 + 动态模糊。
-// "他走了。"被风吹散成烟 → 化成雨 → 雨落下"画"出湿的路口 → 远处红灯 → 雨显出她的背影 → 起风，她的边缘被吹散
+// 开头是手机消息（hook.js）：粒子拼出手机 → 消息"他走了" → 只剩这三个大字 → 在 8.29 秒的起音处，字被风吹散成烟 → 化成雨 → 雨落下"画"出湿的路口 → 远处红灯 → 雨显出她的背影 → 起风，她的边缘被吹散
 // 世界坐标：y 向下为正，地面 y = 0；z 向前。画面只由时间 t 决定。
 const ctx = document.getElementById("c").getContext("2d"), P = new Pts(1200000);
 const FOC = 1250;
@@ -13,8 +14,8 @@ const NEAR = 650, FAR = 1500, ZB = { hw: 300, z0: 690, step: 112, d: 56, n: 7 },
 const sm = x => { x = clamp(x); return x * x * x * (x * (x * 6 - 15) + 10); };       // 比 smoothstep 更柔的缓动
 function kf(t, ks) { if (t <= ks[0][0]) return ks[0][1]; for (let i = 1; i < ks.length; i++) if (t < ks[i][0]) return mix(ks[i - 1][1], ks[i][1], sm((t - ks[i - 1][0]) / (ks[i][0] - ks[i - 1][0]))); return ks[ks.length - 1][1]; }
 function camAt(t) {
-  const x = kf(t, [[0, 0], [9, 40], [16, -10]]), y = kf(t, [[0, -150], [16, -140]]), z = kf(t, [[0, -200], [5, -140], [16, 200]]);
-  const p = kf(t, [[0, 0], [5.5, 0.07], [11, 0.05], [16, 0.045]]);
+  const x = kf(t, [[0, 0], [2, 0], [9, 40], [16, -10]]), y = kf(t, [[0, -150], [2, -150], [16, -140]]), z = kf(t, [[0, -200], [2, -200], [5, -140], [16, 200]]);
+  const p = kf(t, [[0, 0], [2, 0], [5.5, 0.07], [11, 0.05], [16, 0.045]]);
   return { x, y, z, cp: Math.cos(p), sp: Math.sin(p), p };
 }
 // 世界 → 屏幕（带俯仰）。返回 null 表示在镜头后面
@@ -38,10 +39,10 @@ let NT, TX, TY, TZ, TU, NR, R0, NG, G, NB, B, NH, HM, SIG;
 const RAINBOX = { x0: -1500, x1: 1500, z0: 160, z1: 2700, top: -1150, span: 1250 };
 function build() {
   const r = rng(91);
-  // 字："他走了。" 放在 z = 900 的平面上（1 蒙版像素 = 0.9 单位）
-  const tc = cloud(c => { c.textAlign = "center"; c.textBaseline = "middle"; c.font = `400 220px ${SERIF}`; c.fillText("他走了。", 0, 0); }, [-520, -160, 1040, 320], 0.75, 3);
+  // 字："他走了" 放在 z = 900 的平面上，大小和手机消息里放大的那三个字完全一样，接得上
+  const tc = cloud(c => { c.textAlign = "center"; c.textBaseline = "middle"; c.font = `400 220px ${SERIF}`; c.fillText("他走了", 0, 0); }, [-520, -160, 1040, 320], 0.75, 3);
   NT = tc.n; TX = new Float32Array(NT); TY = new Float32Array(NT); TZ = new Float32Array(NT); TU = new Float32Array(NT);
-  let xmin = 1e9, xmax = -1e9; for (let i = 0; i < NT; i++) { TX[i] = tc.x[i] * 0.62; TY[i] = -150 + tc.y[i] * 0.62; TZ[i] = 900 + (r() - 0.5) * 6; xmin = Math.min(xmin, TX[i]); xmax = Math.max(xmax, TX[i]); }
+  let xmin = 1e9, xmax = -1e9; for (let i = 0; i < NT; i++) { TX[i] = tc.x[i] * 0.96; TY[i] = -150 + tc.y[i] * 0.96; TZ[i] = 900 + (r() - 0.5) * 6; xmin = Math.min(xmin, TX[i]); xmax = Math.max(xmax, TX[i]); }
   for (let i = 0; i < NT; i++) TU[i] = (TX[i] - xmin) / (xmax - xmin);
   // 雨（前 NT 滴由字化成）
   NR = NT + 15000; R0 = new Float32Array(NR * 4);
@@ -109,8 +110,8 @@ function textPos(i, t, o) {
   o[0] = mix(fx, RP[0], e); o[1] = mix(fy, RP[1], e); o[2] = mix(fz, RP[2], e); o[3] = e;
 }
 const TP = [0, 0, 0, 0];
-function renderAt(t) {
-  P.clear(); const c0 = camAt(t);
+function flowPts(t) {
+  const c0 = camAt(t);
   const rainOn = ss(2.6, 6.5, t), fadeEnd = 1 - ss(15.0, 16, t);
   // ---- 字 → 烟 → 雨 ----
   for (let i = 0; i < NT; i++) {
@@ -188,10 +189,11 @@ function renderAt(t) {
       P.push(PX, PY, 0.8, 0.88, 1, a * depthA(PZ) / ns * fadeEnd);
     }
   }
-  splatAll(P);
-
+}
+function flowBack(t, wf) {
+  const c0 = camAt(t), fadeEnd = 1 - ss(15.0, 16, t), sOn = ss(5.6, 7.0, t) * fadeEnd, breathe = 0.85 + 0.15 * Math.sin(t * 2.2), bOn = ss(5.4, 9, t) * fadeEnd;
   // ---- 背景：深夜的天，城市在地平线附近的微光 ----
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = wf;
   const hy = 540 - FOC * Math.tan(c0.p), bg = ctx.createLinearGradient(0, 0, 0, H);
   bg.addColorStop(0, "#020309"); bg.addColorStop(clamp(hy / H - 0.08), "#060a18"); bg.addColorStop(clamp(hy / H + 0.02), "#0b1226"); bg.addColorStop(1, "#03050c");
   ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
@@ -209,13 +211,25 @@ function renderAt(t) {
   if (bOn > 0) for (let i = 0; i < 30; i++) { const j = Math.floor(hash(i * 9.1) * NB); if (B[j * 5 + 3] < 0.7) continue; if (!proj(c0, B[j * 5], B[j * 5 + 1], B[j * 5 + 2])) continue; glow(ctx, PX, PY, 14 + hash(i) * 20, B[j * 5 + 4] ? "255,200,140" : "170,190,255", 0.09 * bOn); }
   ctx.globalCompositeOperation = "source-over";
   // 清晰的字底（风起之前），保证开头的字锐利
-  const crisp = 1 - ss(1.9, 2.6, t); if (crisp > 0 && proj(c0, 0, -150, 900)) { ctx.save(); ctx.globalAlpha = 0.5 * crisp * ss(0, 0.8, t); ctx.fillStyle = "rgb(225,235,255)"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `400 ${220 * 0.62 * FOC / PZ}px ${SERIF}`; ctx.fillText("他走了。", PX, PY); ctx.restore(); }
+  const crisp = 1 - ss(1.9, 2.6, t); if (crisp > 0 && proj(c0, 0, -150, 900)) { ctx.save(); ctx.globalAlpha = 0.5 * crisp * wf; ctx.fillStyle = "rgb(225,235,255)"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.font = `400 ${220 * 0.96 * FOC / PZ}px ${SERIF}`; ctx.fillText("他走了", PX, PY); ctx.restore(); }
+  ctx.globalAlpha = 1;
+}
+// ---- 总装：0–7.3 秒是手机消息；7.3–7.7 秒把放大的"他走了"无缝交给三维粒子；之后是流动的长镜头 ----
+const SHIFT = 6.29, HAND0 = 7.3, HAND1 = 7.7;
+function renderAt(t) {
+  const tf = t - SHIFT, wf = ss(HAND0, HAND1, t), wh = 1 - wf;
+  P.clear();
+  if (wh > 0.001) { P.k = wh; HOOK.pts(P, t); }
+  if (wf > 0.001) { P.k = wf; flowPts(tf); }
+  P.k = 1; splatAll(P);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  if (wh > 0.001) { HOOK.bg(ctx); HOOK.under(ctx, t, wh); }
+  if (wf > 0.001) flowBack(tf, wf);
   composite(ctx, 0.9, 0.4);
   // 暗角、遮幅、开头和结尾的黑
   const v = ctx.createRadialGradient(960, 560, 480, 960, 560, 1250); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,0.5)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, 64); ctx.fillRect(0, H - 64, W, 64);
-  const blk = 1 - ss(0, 0.8, t); if (blk > 0) { ctx.fillStyle = `rgba(0,0,0,${blk})`; ctx.fillRect(0, 0, W, H); }
 }
 window.renderAt = renderAt;
-window.ready = document.fonts.load(`400 100px ${SERIF}`).then(() => { build(); renderAt(0); });
+window.ready = document.fonts.load(`300 32px ${UI}`).then(() => document.fonts.load(`500 30px ${UI}`)).then(() => document.fonts.load(`400 100px ${SERIF}`)).then(() => { build(); HOOK.build(); renderAt(0); });
 </script></body></html>

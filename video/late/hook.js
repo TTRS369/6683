@@ -1,4 +1,4 @@
-// 开头的钩子（0–14 秒）：黑暗里粒子拼出一部手机 → 屏幕亮起，消息"他走了。" → 镜头推近 → 只剩这句话
+// 开头的钩子（0–14 秒）：黑暗里粒子拼出一部手机 → 屏幕亮起，消息"他走了" → 镜头推近 → 只剩这句话
 // → 句子炸开 → 在节奏进来那一拍拼成片名 → 片名随风散去
 // 时间对齐前奏：3.32 / 4.64 / 6.01 / 8.29 起音，10.26 节奏进入，10.94 小节头
 const HOOK = (() => {
@@ -10,9 +10,9 @@ const HOOK = (() => {
     c.save(); c.globalAlpha *= 0.55; rrect(c, BN.x + 24, BN.y + 22, 38, 38, 10); c.fill(); c.restore();
     c.textBaseline = "alphabetic"; c.textAlign = "left"; c.font = `300 24px ${UI}`; c.fillText("信息", BN.x + 76, BN.y + 50);
     c.textAlign = "right"; c.fillText("现在", BN.x + BN.w - 24, BN.y + 50);
-    c.textAlign = "left"; c.font = `500 30px ${UI}`; c.fillText("阿远", BN.x + 24, BN.y + 98); c.font = `300 32px ${UI}`; c.fillText("他走了。", BN.x + 24, BN.y + 140);
+    c.textAlign = "left"; c.font = `500 30px ${UI}`; c.fillText("阿远", BN.x + 24, BN.y + 98); c.font = `300 32px ${UI}`; c.fillText("他走了", BN.x + 24, BN.y + 140);
   }
-  function drawBig(c) { c.textAlign = "center"; c.textBaseline = "middle"; c.font = `400 240px ${SERIF}`; c.fillText("他走了。", 960, 540); }
+  function drawBig(c) { c.textAlign = "center"; c.textBaseline = "middle"; c.font = `400 240px ${SERIF}`; c.fillText("他走了", 960, 540); }
   function sample(drawFn, n, seed) {
     const m = mk(), c = m.getContext("2d"); c.fillStyle = c.strokeStyle = "#fff"; drawFn(c);
     const a = c.getImageData(0, 0, W, H).data, idx = []; for (let k = 0; k < W * H; k++) if (a[k * 4 + 3] > 8) idx.push(k);
