@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>迟到的消息</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style></head>
+<body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="../late/core.js"></script>
+<script src="../late/hook.js"></script>
+<script src="engine.js"></script>
+<script src="s_window.js"></script>
+<script src="s_bus.js"></script>
+<script src="s_swing.js"></script>
+<script src="s_tree.js"></script>
+<script src="s_sky.js"></script>
+<script src="s_beach.js"></script>
+<script>
+// 《迟到的消息》第五版：九个场景，"他留下的痕迹"。配 Suno 原创纯音乐（69.8 BPM，3 分 23 秒）。
+// 场景之间用粒子流动连接：上一个画面的粒子飞起来，重新拼成下一个画面。画面只由时间 E 决定。
+const ctx = document.getElementById("c").getContext("2d"), P = new Pts(1800000), PA = new Pts(1200000), PB = new Pts(1200000);
+// 配乐上量出来的段落
+const S = { peel: 12.31, night: 29.87, dip: 49.7, chorus: 58.0, sky: 86.0, drop: 103.74, beach: 114, rebuild: 127.91, final: 138.19, fall: 163.0, fadeout: 197.75, end: 203.2 };
+// 开头手机消息卡在钢琴上：第一句（0.6–2.4）拼出手机，7.11 钢琴再起时消息到，8.41 推近，9.71 只剩三个字
+const HOOKMAP = [[0, 0], [0.9, 1.25], [5.6, 3.1], [7.11, 3.32], [8.41, 4.64], [9.71, 6.0], [11.2, 7.4], [11.6, 7.7]];
+function hookT(E) { const k = HOOKMAP; if (E >= k[k.length - 1][0]) return k[k.length - 1][1]; for (let i = 1; i < k.length; i++) if (E < k[i][0]) return mix(k[i - 1][1], k[i][1], (E - k[i - 1][0]) / (k[i][0] - k[i - 1][0])); return 0; }
+
+let SCENES = [], TRANS = [];
+function setup() {
+  SCENES = [
+    Object.assign({ t0: 0, t1: S.night }, WINDOW_NIGHT),
+    Object.assign({ t0: S.night, t1: S.dip }, BUS),
+    Object.assign({ t0: S.dip, t1: S.chorus }, SWING),
+    Object.assign({ t0: S.chorus, t1: S.sky }, TREE),
+    Object.assign({ t0: S.sky, t1: 105.0 }, STARS),
+    Object.assign({ t0: 105.0, t1: S.beach }, POINT),
+    Object.assign({ t0: S.beach, t1: S.fall }, BEACH),
+    Object.assign({ t0: S.fall, t1: 999 }, WINDOW_DAY),
+  ];
+  TRANS = [{ a: 28.6, b: 31.0, from: 0, to: 1, type: "morph", o: { lift: 120, swirl: 140, order: "x" } },
+    { a: 48.7, b: 51.2, from: 1, to: 2, type: "morph", o: { lift: 200, swirl: 220 } },
+    { a: 57.0, b: 59.5, from: 2, to: 3, type: "morph", o: { lift: 320, swirl: 260 } },
+    { a: 85.2, b: 88.0, from: 3, to: 4, type: "morph", o: { lift: 520, swirl: 240 } },
+    { a: 105.0, b: 106.4, from: 4, to: 5, type: "fade" },
+    { a: 113.5, b: 117.5, from: 5, to: 6, type: "fade" },
+    { a: 162.0, b: 165.5, from: 6, to: 7, type: "morph", o: { lift: 260, swirl: 220 } }];
+}
+const camsFor = (sc, E) => [sc.cam(E), sc.cam(E - 1 / 360), sc.cam(E - 2 / 360)];
+
+function renderAt(E) {
+  NS = 0; SK = 1; CLIP = null; P.clear();
+  const wh = 1 - ss(11.25, 11.6, E), wf = 1 - wh;
+  if (wh > 0.001) { P.k = wh; HOOK.pts(P, hookT(E)); P.k = 1; }
+  let tr = null; for (const t of TRANS) if (E >= t.a && E < t.b) tr = t;
+  const A = tr ? SCENES[tr.from] : (SCENES.find(s => E >= s.t0 && E < s.t1) || SCENES[SCENES.length - 1]), Bs = tr ? SCENES[tr.to] : null;
+  const e = tr ? eio((E - tr.a) / (tr.b - tr.a)) : 0, cA = camsFor(A, E), cB = Bs ? camsFor(Bs, E) : null, aW = A === SCENES[0] ? wf : 1;
+  if (wf > 0.001) {
+    if (!tr) { P.k = aW; SK = aW; A.pts(P, E, cA[0], cA); }
+    else if (tr.type === "morph") { PA.clear(); PB.clear(); SK = 1 - e; A.pts(PA, E, cA[0], cA); SK = e; Bs.pts(PB, E, cB[0], cB); SK = 1; morph(PA, PB, e, P, tr.o || {}); }
+    else { P.k = 1 - e; SK = 1 - e; A.pts(P, E, cA[0], cA); P.k = e; SK = e; Bs.pts(P, E, cB[0], cB); }
+    P.k = 1; SK = 1;
+  }
+  splatAll(P); drawSprites();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  if (wh > 0.001) { HOOK.bg(ctx); HOOK.under(ctx, hookT(E), wh); }
+  if (wf > 0.001) { A.bg(ctx, E, cA[0], tr ? 1 : aW); if (Bs) Bs.bg(ctx, E, cB[0], e); }
+  composite(ctx, 0.9, 0.42);
+  if (wf > 0.001) { A.over(ctx, E, cA[0], tr ? 1 - e : aW); if (Bs) Bs.over(ctx, E, cB[0], e); }
+  drawTitle2(ctx, E);
+  const v = ctx.createRadialGradient(960, 560, 480, 960, 560, 1250); v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, "rgba(0,0,0,0.5)"); ctx.fillStyle = v; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, 64); ctx.fillRect(0, H - 64, W, 64);
+  const end = ss(199.5, 203.0, E); if (end > 0) { ctx.fillStyle = `rgba(0,0,0,${end})`; ctx.fillRect(0, 0, W, H); }
+}
+// 片名 + 署名（最后那扇有阳光的窗）
+function drawTitle2(ctx, E) {
+  const ta = ss(183, 186, E) * (1 - ss(S.fadeout, 200.5, E)); if (ta <= 0.003) return;
+  ctx.save(); ctx.globalAlpha = ta; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 18;
+  ctx.fillStyle = "rgba(255,250,244,0.95)"; ctx.font = `400 84px ${SERIF}`; ctx.letterSpacing = "22px"; ctx.fillText("迟到的消息", TITLE_POS[0] + 11, TITLE_POS[1]);
+  ctx.globalAlpha = ta * ss(184.5, 187, E); ctx.font = `300 20px ${UI}`; ctx.letterSpacing = "3px"; ctx.fillStyle = "rgba(255,246,238,0.8)"; ctx.fillText("AI 生成动画 · 配乐由 Suno 生成", TITLE_POS[0], TITLE_POS[1] + 76);
+  ctx.letterSpacing = "0px"; ctx.restore();
+}
+const TITLE_POS = [560, 830];
+window.renderAt = renderAt;
+window.ready = document.fonts.load(`300 32px ${UI}`).then(() => document.fonts.load(`500 30px ${UI}`)).then(() => document.fonts.load(`400 100px ${SERIF}`))
+  .then(() => { buildTex(); buildWindow(); buildBus(); buildSwing(); buildTree(); buildSky(); buildBeach(); HOOK.build(); setup(); renderAt(0); });
+</script></body></html>
