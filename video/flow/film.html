@@ -358,17 +358,17 @@ const lightning = E => { let f = 0; for (const t of [75.3, 77.95]) { const d = E
 function drawTraffic(E, c0) {
   const on = ss(S.night - 0.3, S.night + 1.6, E) * (1 - ss(57, 62, E)); if (on <= 0) return;
   for (let car = 0; car < 40; car++) {
-    const lane = car % 2, z = lane ? 1270 : 930, v = (1300 + hash(car * 3.3) * 700) * (lane ? -1 : 1), x0 = hash(car * 7.1) * 7000, ti = lane ? TI("tail") : TI("head");
+    const lane = car % 2, z = lane ? 905 : 770, v = (1300 + hash(car * 3.3) * 700) * (lane ? -1 : 1), x0 = hash(car * 7.1) * 7000, ti = lane ? TI("tail") : TI("head");
     const xh = ((x0 + v * (E - S.night)) % 7000 + 7000) % 7000 - 3500;
     for (const dz of [-34, 34]) {
-      wspr(c0, xh, -55, z + dz, 7, on, ti);
+      wspr(c0, xh, -38, z + dz, 7, on, ti);
       for (let sg = 0; sg < 8; sg++) {
-        if (!proj(c0, xh - v * sg * 0.05, -55, z + dz)) continue; const ax = PX, ay = PY, az = PZ;
-        if (!proj(c0, xh - v * (sg + 1) * 0.05, -55, z + dz)) continue; const bx = PX, by = PY;
+        if (!proj(c0, xh - v * sg * 0.05, -38, z + dz)) continue; const ax = PX, ay = PY, az = PZ;
+        if (!proj(c0, xh - v * (sg + 1) * 0.05, -38, z + dz)) continue; const bx = PX, by = PY;
         const d = Math.max(1.6, 2 * 3.2 * FOC / az);
         spr((ax + bx) / 2, (ay + by) / 2, Math.hypot(ax - bx, ay - by) + d, d, Math.atan2(ay - by, ax - bx), 0.75 * on * Math.pow(1 - sg / 8, 1.5) * depthA(az), ti);
       }
-      if (proj(c0, xh, 85, z + dz)) { const d = 2 * 6 * FOC / PZ; spr(PX, PY, d * 5, d * 0.8, Math.PI / 2, 0.2 * on * depthA(PZ), ti); }
+      if (proj(c0, xh, 70, z + dz)) { const d = 2 * 6 * FOC / PZ; spr(PX, PY, d * 6, d * 0.9, Math.PI / 2, 0.3 * on * depthA(PZ), ti); }
     }
   }
 }
